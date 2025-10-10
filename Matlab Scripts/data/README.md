@@ -18,4 +18,4 @@ Load the .mat file, it contains 17 fields
     {'MagnitudeResponse'     }
     {'PhaseResponse'         }
 
- 'measured_ir_data.ImpulseResponse' to show Time and Amplitude
+ command irdata_135911('panel2mic','ImpulseResponse') to show struct for Time and Amplitude
