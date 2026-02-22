@@ -1,0 +1,88 @@
+
+% Noise cancelling: LMS adaptive filter
+% close all;
+% clear all;
+
+% Simulation of a noise canceling system with two microphones. One
+% microphone is placed near the source of acoustic noise so that the pure
+% noise signal is recorded without the audio signal. The other is used to
+% pick up the signal contaminated with the noise. For headphones, the first
+% microphone would be outside of the headphone to pick up the outside
+% noise, and the second microphone would be inside the earpiece to pick up
+% the signal and some of the noise leaking in. The adaptive filter will
+% work to eliminate the noise leaking in so only a pure signal remains.
+
+% read in audio signal
+% [s, Fs] = audioread('Count Bubbas Revenge_short.wav');
+% s = s(:,1);
+[mics, fs] = audioread("double_mics.wav");
+x_ref = mics(:, 2); % the source mic
+
+load('double_mic_irs.mat')
+panel_ir = measurementData(1, 2).ImpulseResponse.Amplitude;
+panel_ir = panel_ir(2560:8192); % shape (1, 8192)
+
+
+n_iterations = 10;
+
+% set filter order for adaptive filter
+N = 16384; 
+
+% set convergence rate for lms
+beta = .1; 
+
+% whether to use nlms or lms
+use_nlms = true;
+
+% params for nlms
+mu = 0.05;
+eps = 1e-6;
+
+
+target = mics(:, 1); % the error mic is what went through the transfer function
+
+% create an array to store the adaptive filter coefficients (should be length N and filled with zeros initially)
+w = zeros(N, n_iterations);
+y = zeros(n_iterations, length(target)); % the final output of (x_ref * w)[n]
+e = zeros(n_iterations, length(target)); % the error 
+
+
+% for fxlms
+x_filt = filter(panel_ir, 1, x_ref);
+
+% loop over the length of the signal
+for i = 1:n_iterations
+
+    % create an array to store delays of the clean noise signal (should be length N and filled with zeros initially)
+    x = zeros(N,1);
+
+    for n = 1:length(target)
+        x = [x_filt(n); x(1:end-1)];
+        y(i, n) = w(:, i).' * x;
+        e(i, n) = target(n) - y(i, n);
+       
+        if use_nlms
+            w(:, i) = w(:, i) + (mu / (eps + x.'*x)) * e(i, n) * x;
+        else
+            w(:, i) = w(:, i) + beta * e(i, n) * x;
+
+        end
+    end
+    if i < n_iterations
+        w(:, i + 1) = w(:, i);
+    end
+end
+
+w_final = w(:, n_iterations);   % N x 1
+u = filter(w_final, 1, x_ref);
+
+ 
+            % maybe solve quadratic problem instead of gradient update
+    
+            % look into frequency domain methods
+    
+            % more iterations over the signal? either repeat the signal or iterate
+    
+            % fxlms?
+
+
