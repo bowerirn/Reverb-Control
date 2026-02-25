@@ -4,8 +4,6 @@ classdef FxRLS < AdaptiveFilter
         cov_scale = 0.1; % larger = more aggressive convergence
         P;
 
-        y;
-        e;
     end
 
     methods
@@ -53,7 +51,7 @@ classdef FxRLS < AdaptiveFilter
                 denom = obj.lamda + x.' * Px;     
                 k = Px / denom; % gain vector (N x 1)
     
-                obj.w = obj.w + obj.k * obj.e(n);
+                obj.w = obj.w + k * obj.e(n);
                 obj.P = (obj.P - k * (x.' * obj.P)) / obj.lamda; % covariance update
             end
         end
