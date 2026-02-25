@@ -16,6 +16,8 @@ classdef FD_FxLMS < AdaptiveFilter
         padN;
         ypad;
         epad;
+        Nfft;
+        P;
     end
 
     methods
@@ -29,31 +31,32 @@ classdef FD_FxLMS < AdaptiveFilter
             end
 
             % Partitioning
-            P = ceil(filter_order / block_len);          % # partitions
+            obj.P = ceil(filter_order / block_len);          % # partitions
             Nfft = 2 * block_len;             % common choice
             if Nfft < 2*block_len
                 error("Nfft must be >= 2*block_len");
             end
 
             % Frequency-domain adaptive filter partitions Wp(k)
-            obj.W = complex(zeros(Nfft, P));   % each column is one partition in freq-domain
+            obj.W = complex(zeros(Nfft, obj.P));   % each column is one partition in freq-domain
 
             % Keep last (P-1) FFT blocks of input spectra for convolution
-            obj.Xhist = complex(zeros(Nfft, P));  % newest in col 1
+            obj.Xhist = complex(zeros(Nfft, obj.P));  % newest in col 1
 
             % Power estimate per bin for normalization (smoothed)
             obj.Pow = eps * ones(Nfft, 1);
             obj.alpha = 0.9; % smoothing for power estimate (0.8-0.99 typical)
 
+            obj.Nfft = Nfft;
             % Overlap-save buffers
             obj.x_ov = zeros(block_len, 1);   % previous block tail (for building 2*block_len input)
             obj.y_ov = zeros(block_len, 1);   % overlap part from ifft result (discarded)
 
             % Pad signals to a multiple of B
-            obj.nBlocks = ceil(length(target) / block_len);
-            obj.padN = obj.nBlocks * block_len - length(target);
-            obj.xpad = [x_filt; zeros(padN, 1)];
-            obj.tpad = [target; zeros(padN, 1)];
+            obj.nBlocks = ceil(length(obj.target) / block_len);
+            obj.padN = obj.nBlocks * block_len - length(obj.target);
+            obj.xpad = [obj.x_filt; zeros(obj.padN, 1)];
+            obj.tpad = [obj.target; zeros(obj.padN, 1)];
         end
 
         
@@ -74,19 +77,19 @@ classdef FD_FxLMS < AdaptiveFilter
                 x2 = [obj.x_ov; x_blk];         % length 2B
                 obj.x_ov = x_blk;               % next overlap
 
-                X = fft(x2, Nfft);
+                X = fft(x2, obj.Nfft);
 
                 % Update input spectrum history (shift right, insert newest)
                 obj.Xhist(:,2:end) = obj.Xhist(:,1:end-1);
                 obj.Xhist(:,1) = X;
 
                 % Compute output spectrum: Y = sum_p Wp .* Xhist_p
-                Y = zeros(Nfft, 1);
-                for p = 1:P
+                Y = zeros(obj.Nfft, 1);
+                for p = 1:obj.P
                     Y = Y + obj.W(:,p) .* obj.Xhist(:,p);
                 end
 
-                y2 = real(ifft(Y, Nfft));   % time-domain 2B (valid part is last B)
+                y2 = real(ifft(Y, obj.Nfft));   % time-domain 2B (valid part is last B)
                 y_blk = y2(obj.block_len+1 : obj.block_len+obj.block_len);
 
                 % Error block (time domain)
@@ -98,7 +101,7 @@ classdef FD_FxLMS < AdaptiveFilter
                 obj.epad(idx) = e_blk;
 
                 % FFT of error, zero-pad as 2B with leading zeros (alignment)
-                E = fft([zeros(B,1); e_blk], Nfft);
+                E = fft([zeros(obj.block_len,1); e_blk], obj.Nfft);
 
                 % Power estimate per bin for normalization (smoothed)
                 obj.Pow = obj.alpha * obj.Pow + (1 - obj.alpha) * (abs(X).^2);
@@ -113,21 +116,32 @@ classdef FD_FxLMS < AdaptiveFilter
                 % Gradient term
                 G = (mu_fd ./ den) .* E;  % Nfft x 1
                 
-                for p = 1:P
+                for p = 1:obj.P
                     % Update in frequency domain
                     obj.W(:,p) = obj.W(:,p) + conj(obj.Xhist(:,p)) .* G;
                 
                     % ---- IMPORTANT: enforce time-domain partition constraint ----
-                    wp = real(ifft(obj.W(:,p), Nfft));
-                    wp(B+1:end) = 0;      % keep only first B taps of this partition
-                    obj.W(:,p) = fft(wp, Nfft);
+                    wp = real(ifft(obj.W(:,p), obj.Nfft));
+                    wp(obj.block_len+1:end) = 0;      % keep only first B taps of this partition
+                    obj.W(:,p) = fft(wp, obj.Nfft);
                 end
 
             end
 
-        % Trim padding
-        obj.y = obj.ypad(1:N);
-        obj.e = obj.epad(1:N);
+            % Trim padding
+            obj.y = obj.ypad(1:length(obj.target));
+            obj.e = obj.epad(1:length(obj.target));
+
+            B = obj.block_len;
+            L = obj.filter_order;
+
+            w_full = zeros(obj.P * B, 1, 'like', obj.y);  % keep gpu/cpu type consistent
+            for p = 1:obj.P
+                wp_time = real(ifft(obj.W(:,p), obj.Nfft));
+                wp_time = wp_time(1:B);
+                w_full((p-1)*B + (1:B)) = wp_time;
+            end
+            obj.w = w_full(1:L);
         end
 
     end

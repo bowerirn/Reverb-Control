@@ -51,7 +51,7 @@ classdef (Abstract) AdaptiveFilter < handle
         
 
         function [final_pred, mses] = learn(obj, n_iter, varargin)
-            log = nargin > 2;
+            log = nargin > 2 && varargin{1};
 
             mses = zeros(1, n_iter);
 
