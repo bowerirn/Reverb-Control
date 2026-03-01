@@ -1,12 +1,12 @@
 function save_cancel_clip(wav, filename)
     [a, fs] = arthur();
     
-        disp(size(a));
-        disp(size(wav));
-
     wav = wav(1:length(a));
-
     y = ([wav, a]);
-    audiowrite([filename, '.wav'], y, fs);
-    audiowrite([filename, '_no_cancel.wav'], [zeros(size(wav), 1), a], fs);
+    no_panel = [zeros(length(wav), 1), a];
+
+    cancel = ['audio_experiments', filesep, filename, '_cancel.wav'];
+    nc = ['audio_experiments', filesep, filename, '_nc.wav'];
+    audiowrite(cancel, y, fs);
+    audiowrite(nc, no_panel, fs);
 end
