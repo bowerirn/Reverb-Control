@@ -19,7 +19,7 @@ classdef CancelAnalysis < handle
         function obj = CancelAnalysis(name)
             obj.name = name;
             cancel_fn = ['audio_experiments', filesep, name, '_mics.wav'];
-            nc_fn = ['audio_experiments', filesep, name, '_mics_nc.wav'];
+            nc_fn = ['audio_experiments', filesep, 'mics_nc.wav'];
         
             [mics, fs] = audioread(cancel_fn);
             obj.error_mic = mics(:, 1);
@@ -60,12 +60,31 @@ classdef CancelAnalysis < handle
                 legend('No Cancel', 'With Cancel');
             end
 
-            title(['Cancellation Results for ', obj.name]);
+            title(['Cancellation Results for ', obj.name], 'Interpreter', 'none');
             xlabel('Time (s)');
             ylabel('Amplitude');
             xlim([obj.t(1), obj.t(end)]);
         end
+
+        function [rms_diff, cancel_rms, nc_rms] = rms_diff(obj)
+            rms_diff = abs(obj.cancel_rms - obj.nc_rms);
+            cancel_rms = obj.cancel_rms;
+            nc_rms = obj.nc_rms;
+
+            if cancel_rms > nc_rms
+                fprintf('Cancel RMS is %.6f greater than no-cancel RMS\n', rms_diff);
+            else
+                fprintf('Cancel RMS is %.6f less than no-cancel RMS\n', rms_diff);
+            end
+
+            fprintf('Cancel RMS: %.4f\n', cancel_rms);
+            fprintf('No-cancel RMS: %.4f\n', nc_rms);
+
+        end
     end
+
+
+    
 
 
 
