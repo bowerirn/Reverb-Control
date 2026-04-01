@@ -13,6 +13,10 @@ classdef (Abstract) AdaptiveFilter < handle
 
         w
         x_filt
+        
+    end
+
+    properties (Dependent)
         ref_filt
     end
     
@@ -55,15 +59,15 @@ classdef (Abstract) AdaptiveFilter < handle
 
             mses = zeros(1, n_iter);
 
-            if obj.gpu
-                obj.w = gpuArray(obj.w);
-                obj.target = gpuArray(obj.target);
-                obj.ref = gpuArray(obj.ref);
-                obj.x_filt = gpuArray(obj.x_filt);
-                obj.y = gpuArray(obj.y);
-                obj.e = gpuArray(obj.e);
-                obj.to_gpu();
-            end
+            % if obj.gpu
+            %     obj.w = gpuArray(obj.w);
+            %     obj.target = gpuArray(obj.target);
+            %     obj.ref = gpuArray(obj.ref);
+            %     obj.x_filt = gpuArray(obj.x_filt);
+            %     obj.y = gpuArray(obj.y);
+            %     obj.e = gpuArray(obj.e);
+            %     obj.to_gpu();
+            % end
 
             for i = 1:n_iter
                 if log
@@ -73,15 +77,15 @@ classdef (Abstract) AdaptiveFilter < handle
                 mses(i) = mean(gather(obj.e).^2);
             end
 
-            if obj.gpu
-                obj.w = gather(obj.w);
-                obj.target = gather(obj.target);
-                obj.ref = gather(obj.ref);
-                obj.x_filt = gather(obj.x_filt);
-                obj.y = gather(obj.y);
-                obj.e = gather(obj.e);
-                obj.to_cpu();
-            end
+            % if obj.gpu
+            %     obj.w = gather(obj.w);
+            %     obj.target = gather(obj.target);
+            %     obj.ref = gather(obj.ref);
+            %     obj.x_filt = gather(obj.x_filt);
+            %     obj.y = gather(obj.y);
+            %     obj.e = gather(obj.e);
+            %     obj.to_cpu();
+            % end
 
             final_pred = obj.y;
         end
@@ -90,7 +94,7 @@ classdef (Abstract) AdaptiveFilter < handle
     end
 
     methods (Abstract)
-        [y, e] = update_coefficients(obj);
+        update_coefficients(obj);
         to_gpu(obj);
         to_cpu(obj);
 

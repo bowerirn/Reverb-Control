@@ -22,12 +22,7 @@ classdef FxLMS < AdaptiveFilter
         function update_coefficients(obj)
             x = zeros(obj.filter_order, 1);
 
-            if obj.gpu
-                x = gpuArray(x);               
-            end
-
             xnorm = 0;
-        
             for n = 1:length(obj.target)
 
                 old = x(end);
