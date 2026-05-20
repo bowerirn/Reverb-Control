@@ -1,0 +1,10 @@
+[build-system]
+requires = ["setuptools", "pybind11"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reverb-control"
+version = "0.0.1"
+
+[tool.setuptools]
+packages = ["src"]
