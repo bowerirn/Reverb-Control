@@ -1,0 +1,7 @@
+numpy
+scipy
+matplotlib
+pybind11
+ipykernel
+sounddevice
+soundfile
