@@ -21,6 +21,8 @@ As I feared, the loopback method doesn't work for the empty input channel.
 It just doesn't pick up anything. 
 I'll need to either do the Matlab method, or just physically measure distances. 
 
+I used ChatGPT to implement the Matlab latency compensation, I'll test it tomorrow
+
 ### Next Steps
-- Implement the Matlab latency compensation
+- Test the Matlab latency compensation
 - Attempt cancellation
