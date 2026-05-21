@@ -1,3 +1,6 @@
+import os
+os.environ["SD_ENABLE_ASIO"] = "1"
+
 import numpy as np
 from scipy.signal import chirp, fftconvolve
 import sounddevice as sd
