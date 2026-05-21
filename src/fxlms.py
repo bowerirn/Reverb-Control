@@ -74,8 +74,6 @@ class FxLMS:
             mse = np.mean(e_eval ** 2)
             self.mses.append(mse)
 
-        final_pred = self.y
-
         if plot_result:
             self.results_plot()
 
