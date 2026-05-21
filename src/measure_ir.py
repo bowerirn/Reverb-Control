@@ -23,13 +23,18 @@ def make_sweep(fs=48000, duration=5.0, f0=20, f1=20000, fade=0.02):
     return sweep
 
 
-def estimate_ir(recorded, sweep, fs=48000, duration=5.0, f0=20, f1=20000):
+def estimate_ir(recorded, sweep, fs=48000, f0=20, f1=20000):
+    duration = len(sweep) / fs
     t = np.arange(len(sweep)) / fs
-    k = np.log(f1/f0) / duration
-    env = np.exp(t * k)
+    k = np.log(f1 / f0) / duration
 
-    inv = (sweep[::-1] / env).astype(np.float32)
-    return fftconvolve(recorded, inv, mode='full')
+    # decay envelope applied to reversed sweep
+    env = np.exp(-t * k)
+
+    inv = (sweep[::-1] * env).astype(np.float32)
+    ir = fftconvolve(recorded, inv, mode="full")
+
+    return ir
 
 
 
@@ -39,8 +44,11 @@ def measure_ir(fs=48000, duration=5, f0=20, f1=20000, player_channel=0):
 
     sweep = make_sweep(fs, duration, f0, f1)
 
-    out = np.zeros((len(sweep), 2), dtype=np.float32)
-    out[:, player_channel] = sweep
+    silence = np.zeros(int(fs * 2.0), dtype=np.float32)  # 2 sec decay
+    play_signal = np.concatenate([sweep, silence])
+
+    out = np.zeros((len(play_signal), 2), dtype=np.float32)
+    out[:len(sweep), player_channel] = sweep
 
     # Play sweep, record 3 channels: [error_mic, reference_mic, loopback (no wires)]
     recording = sd.playrec(
@@ -55,9 +63,9 @@ def measure_ir(fs=48000, duration=5, f0=20, f1=20000, player_channel=0):
     error_mic = recording[:, 0]
     reference_mic = recording[:, 1]
 
-    loop_ir = estimate_ir(loopback, sweep, fs, duration, f0, f1)
-    error_ir = estimate_ir(error_mic, sweep, fs, duration, f0, f1)
-    reference_ir = estimate_ir(reference_mic, sweep, fs, duration, f0, f1)
+    loop_ir = estimate_ir(loopback, sweep, fs, f0, f1)
+    error_ir = estimate_ir(error_mic, sweep, fs, f0, f1)
+    reference_ir = estimate_ir(reference_mic, sweep, fs, f0, f1)
 
     loop_peak = np.argmax(np.abs(loop_ir))
     error_peak = np.argmax(np.abs(error_ir))
@@ -77,4 +85,4 @@ def measure_ir(fs=48000, duration=5, f0=20, f1=20000, player_channel=0):
     print(f"Estimated distance to error mic: {distance_m_0 * 100:.2f} cm")
     print(f"Estimated distance to reference mic: {distance_m_1 * 100:.2f} cm")
 
-    return error_ir_aligned, reference_ir_aligned, loop_ir
+    return error_ir, reference_ir, loop_ir
