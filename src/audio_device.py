@@ -51,4 +51,4 @@ class AudioDevice:
         error_mic = rec[:, 0]
         reference_mic = rec[:, 1]
 
-        return error_mic, reference_mic, rec
+        return error_mic, reference_mic

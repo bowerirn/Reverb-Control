@@ -74,11 +74,16 @@ class FxLMS:
             mse = np.mean(e_eval ** 2)
             self.mses.append(mse)
 
+        print(f'Final MSE: {self.mses[-1]:.3e}')
+        print(f'Lowest MSE: {min(self.mses):.3e}')
+
         if plot_result:
             self.results_plot()
 
         if plot_mse:
             self.plot_mses()
+
+
     
 
 
@@ -90,6 +95,8 @@ class FxLMS:
         plt.plot(pred, label="learned prediction", alpha=0.7)
         plt.legend()
         plt.title('FxLMS Results')
+        plt.xlabel('Samples')
+        plt.ylabel('Amplitude')
         plt.show()
 
 

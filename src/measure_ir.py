@@ -1,12 +1,9 @@
-import os
-os.environ["SD_ENABLE_ASIO"] = "1"
-
 import numpy as np
-from scipy.signal import chirp, fftconvolve, correlate
-import sounddevice as sd
+from scipy.signal import chirp, fftconvolve
+from .audio_device import AudioDevice
 
 
-def make_sweep(fs=48000, duration=5.0, f0=20, f1=20000, fade=0.02):
+def make_sweep(fs=48000, duration=6.0, f0=150, f1=22000, fade=0.02):
     t = np.arange(int(fs * duration)) / fs
 
     sweep = chirp(t, f0=f0, f1=f1, t1=duration, method='logarithmic').astype(np.float32)
@@ -23,118 +20,63 @@ def make_sweep(fs=48000, duration=5.0, f0=20, f1=20000, fade=0.02):
     return sweep
 
 
-def estimate_ir(recorded, sweep, fs=48000, f0=20, f1=20000):
+def estimate_ir(recorded, sweep, fs=48000, f0=150, f1=22000):
     duration = len(sweep) / fs
     t = np.arange(len(sweep)) / fs
     k = np.log(f1 / f0) / duration
 
-    # decay envelope applied to reversed sweep
     env = np.exp(-t * k)
-
     inv = (sweep[::-1] * env).astype(np.float32)
+
     ir = fftconvolve(recorded, inv, mode="full")
 
-    return ir
+    # normalize so sweep convolved with inverse has peak 1
+    auto = fftconvolve(sweep, inv, mode="full")
+    norm = np.max(np.abs(auto))
+
+    return ir / norm
 
 
 
-def compute_latency(latency_sweep, sweep_rec, fs=48000, f0=24, f1=2400):
-    # MATLAB-like loopback quality check
-    xc = correlate(sweep_rec, latency_sweep, mode="full")
-    peak = np.max(np.abs(xc))
-    quality = peak / (np.sqrt(np.mean(xc**2)) + 1e-12)
-
-    if peak < 0.01 or quality < 10:
-        raise RuntimeError(
-            "Loopback signal is too weak/noisy. Check routing or physical loopback cable."
-        )
-
-    loop_ir = estimate_ir(sweep_rec, latency_sweep, fs, f0, f1)
-    latency = int(np.argmax(np.abs(loop_ir)) - (len(latency_sweep) - 1))
-
-    return latency, loop_ir
-
-
-
-def measure_ir(fs=48000, duration=5, f0=20, f1=20000, latency_duration=0.5, decay_duration=2.0, player_channel=0, latency_channel=0):
-
+def measure_ir(ad: AudioDevice, duration=6.0, f0=150, f1=22000, player_channel=0, silence=4.0):
     if player_channel not in (0, 1):
         raise ValueError("player_channel must be 0 or 1")
-    
-    latency_f0 = fs / 2000
-    latency_f1 = fs / 20
 
-    latency_sweep = 0.5 * make_sweep(
-        fs=fs,
-        duration=latency_duration,
-        f0=latency_f0,
-        f1=latency_f1,
-    )
+    sweep = make_sweep(ad.fs, duration, f0, f1)
 
+    decay_silence = np.zeros(int(ad.fs * silence), dtype=np.float32)  # 2 sec decay
+    play_signal = np.concatenate([sweep, decay_silence])
 
-    sweep = make_sweep(fs, duration, f0, f1)
+    out = np.zeros((len(play_signal), 2), dtype=np.float32)
+    out[:len(sweep), player_channel] = sweep
 
-    pre_silence = np.zeros(max(int(0.1 * fs), 1024), dtype=np.float32)
-    decay = np.zeros(int(decay_duration * fs), dtype=np.float32)
+    error_mic, ref_mic = ad.play(out[:, 0], out[:, 1])
 
-    # Timeline:
-    # silence -> latency_sweep -> main_sweep -> decay silence
-    total_len = len(pre_silence) + len(latency_sweep) + len(sweep) + len(decay)
-    out = np.zeros((total_len, 2), dtype=np.float32)
-
-    latency_start = len(pre_silence)
-    main_start = latency_start + len(latency_sweep)
-
-    out[latency_start:latency_start + len(latency_sweep), player_channel] = latency_sweep
-    out[main_start:main_start + len(sweep), player_channel] = sweep
+    error_ir = estimate_ir(error_mic, sweep, ad.fs, f0, f1)
+    ref_ir = estimate_ir(ref_mic, sweep, ad.fs, f0, f1)
 
 
-    # Play sweep, record 3 channels: [error_mic, reference_mic, loopback (no wires)]
-    recording = sd.playrec(
-        out,
-        samplerate=fs,
-        channels=3,
-        dtype='float32',
-        blocking=True
-    )
-
-    latency_rec = recording[
-        latency_start:latency_start + len(latency_sweep),
-        latency_channel,
-    ]
-
-    error_arrival_samples, error_arrival_ir = compute_latency(
-        latency_sweep,
-        latency_rec,
-        fs=fs,
-        f0=latency_f0,
-        f1=latency_f1,
-    )
-
-    main_rec = recording[main_start:, :]
-
-    error_mic = main_rec[:, 0]
-    reference_mic = main_rec[:, 1]
-
-    error_ir = estimate_ir(error_mic, sweep, fs, f0, f1)
-    ref_ir = estimate_ir(reference_mic, sweep, fs, f0, f1)
+    return error_ir, ref_ir
 
 
-    error_ir_aligned = error_ir[error_arrival_samples:]
-    ref_ir_aligned = ref_ir[error_arrival_samples:]
 
+def align_ir_by_distance(ir, distance_cm, ir_len=128, fs=48000):
+    sound_speed = 343.0
 
-    print(f"Error mic arrival delay: {error_arrival_samples} samples")
-    print(f"Error mic arrival delay: {error_arrival_samples / fs * 1000:.3f} ms")
+    acoustic_delay = int(round((distance_cm / 100.0) / sound_speed * fs))
 
-    return {
-        "error_ir": error_ir,
-        "ref_ir": ref_ir,
-        "error_ir_aligned": error_ir_aligned,
-        "ref_ir_aligned": ref_ir_aligned,
-        "error_arrival_ir": error_arrival_ir,
-        "latency_samples": error_arrival_samples,
-        "recording": recording,
-        "main_sweep": sweep,
-        "latency_sweep": latency_sweep,
-    }
+    peak = np.argmax(np.abs(ir))
+
+    start = peak - acoustic_delay
+    if start < 0:
+        start = 0
+
+    end = start + ir_len
+
+    if end > len(ir):
+        out = np.zeros(ir_len, dtype=ir.dtype)
+        available = ir[start:]
+        out[:len(available)] = available
+        return out
+
+    return ir[start:end]
