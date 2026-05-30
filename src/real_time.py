@@ -1,6 +1,7 @@
 import numpy as np
 import sounddevice as sd
 from scipy.signal import lfilter
+import matplotlib.pyplot as plt
 
 class RealtimeFxLMS:
     def __init__(
@@ -42,10 +43,9 @@ class RealtimeFxLMS:
         N = len(self.source)
         self.error_log = np.zeros(N, dtype=np.float32)
         self.cancel_log = np.zeros(N, dtype=np.float32)
-        self.source_log = np.zeros(N, dtype=np.float32)
         self.log_pos = 0
         
-        num_blocks = int(np.ceil(len(self.source) / self.block_size))
+        num_blocks = int(np.ceil(len(self.source) / self.block_size) + 10) # safety
         self.w_norm_log = np.zeros(num_blocks, dtype=np.float32)
         self.block_pos = 0
 
@@ -194,8 +194,8 @@ class RealtimeFxLMS:
                 )
 
             w_norm = np.linalg.norm(self.w)
-            # if w_norm > max_norm:
-            #     self.w *= max_norm / w_norm
+            if w_norm > max_norm:
+                self.w *= max_norm / w_norm
 
             cancel_block = np.clip(cancel_block, -0.1, 0.1)
 
@@ -204,7 +204,6 @@ class RealtimeFxLMS:
 
             self.error_log[self.log_pos:end] = error_block[:ncopy]
             self.cancel_log[self.log_pos:end] = cancel_block[:ncopy]
-            self.source_log[self.log_pos:end] = source_block[:ncopy]
             self.log_pos = end
 
             self.w_norm_log[self.block_pos] = w_norm
@@ -252,9 +251,74 @@ class RealtimeFxLMS:
             while self.running:
                 sd.sleep(100)
 
-        source = self.source_log[:self.log_pos]
         cancel = self.cancel_log[:self.log_pos]
         error = self.error_log[:self.log_pos]
         w_norm_log = self.w_norm_log[:self.block_pos]
 
-        return source, cancel, error, w_norm_log
+        title_ext = f'{"{"}step={step_fn(0):1.1e}, c_gain={cancel_gain}, leak={leak:1.1e}{", fx" if fx else ""}{", nlms" if nlms else ""}{", source" if clean_source else ''}{"}"}'
+
+        return error, cancel, w_norm_log, title_ext
+    
+    
+
+    def plot_error_mic(self, error_nc=None, title_ext=''):
+        plt.figure(figsize=(10, 4))
+
+        if error_nc is not None:
+            plt.plot(error_nc, alpha=0.8, label="No Cancel")
+
+        plt.plot(self.error_log[:self.log_pos], alpha=0.8, label="With Cancel")
+
+
+        plt.title(f"Error Mic Signal During FxLMS {title_ext}")
+        plt.xlabel("Samples")
+        plt.ylabel("Amplitude")
+        plt.legend(loc='upper right')
+        plt.grid(True)
+        plt.show()
+
+
+    def _block_rms(self, x):
+        n = len(x) // self.block_size
+        x = x[:n * self.block_size].reshape(n, self.block_size)
+        return np.sqrt(np.mean(x**2, axis=1))
+    
+    def plot_rms(self, error_nc=None, title_ext=''):
+        if error_nc is not None:
+            err_rms_nc = self._block_rms(error_nc)
+
+        err_rms = self._block_rms(self.error_log[:self.log_pos])
+
+        plt.figure(figsize=(8, 4))
+
+        if error_nc is not None:
+            plt.plot(err_rms_nc, label="No Cancel")
+
+        plt.plot(err_rms, label="With Cancel")
+
+        plt.yscale("log")
+        plt.title(f"Error Mic RMS Over Time {title_ext}")
+        plt.xlabel("Block")
+        plt.ylabel("RMS")
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
+
+    def plot_w_norm(self, title_ext=''):
+        plt.figure(figsize=(8, 4))
+        plt.plot(self.w_norm_log[:self.block_pos])
+        plt.xlabel("Update Step")
+        plt.ylabel(r"$||w||_2$")
+        plt.title(f"Adaptive Filter Weight Norm {title_ext}")
+        plt.grid(True)
+        plt.show()
+
+
+    def all_plots(self, error_nc=None, title_ext=''):
+        self.plot_error_mic(error_nc, title_ext)
+        self.plot_rms(error_nc, title_ext)
+        self.plot_w_norm(title_ext)
+
+
+    

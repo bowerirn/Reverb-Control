@@ -1,0 +1,41 @@
+step = 1e-3
+c_gain = .1
+leak = 1e-7
+ir_len = 128
+filt = 256
+
+step = 1e-3
+c_gain = .1
+leak = 3e-7
+ir_len = 128
+filt = 256
+
+step = 1e-3
+c_gain = .1
+leak = 1e-6
+ir_len = 128
+filt = 256
+
+step = 3e-4
+c_gain = .2
+leak = 1e-7
+ir_len = 128
+filt = 256
+
+step = 1e-3
+c_gain = .2
+leak = 1e-7
+ir_len = 128
+filt = 256
+
+step = 3e-4
+c_gain = .2
+leak = 3e-7
+ir_len = 128
+filt = 256
+
+step = 1e-3
+c_gain = .2
+leak = 1e-6
+ir_len = 128
+filt = 256
