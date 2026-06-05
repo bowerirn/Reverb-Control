@@ -1,7 +1,8 @@
 import numpy as np
 import sounddevice as sd
-from scipy.signal import lfilter
+from scipy.signal import lfilter, coherence, welch
 import matplotlib.pyplot as plt
+
 from . import lms_rt_ext
 
 class RealtimeFxLMS:
@@ -326,9 +327,74 @@ class RealtimeFxLMS:
         plt.show()
 
 
+    def plot_coherence(self):
+        f, Cxy = coherence(
+            self.source,
+            self.error_log,
+            fs=self.ad.fs,
+        )
+
+        plt.figure(figsize=(8,4))
+        plt.semilogx(f, Cxy)
+        plt.ylim([0, 1])
+        plt.grid(True, which="both")
+        plt.xlabel("Frequency [Hz]")
+        plt.ylabel("Coherence")
+        plt.title("Reference → Error Mic Coherence")
+        plt.show()
+
+
+    def plot_error_reduction(self, error_nc):
+        f, Pc = welch(self.error_log[:self.log_pos], self.ad.fs)
+        _, Pnc = welch(error_nc, self.ad.fs)
+
+        reduction_db = 10 * np.log10(
+            (Pc + 1e-20) /
+            (Pnc + 1e-20)
+        )
+
+        plt.figure(figsize=(8,4))
+        plt.semilogx(f, reduction_db)
+
+        plt.axhline(0, ls='--')
+        plt.grid(True, which="both")
+
+        plt.xlabel("Frequency [Hz]")
+        plt.ylabel("ANC / No ANC [dB]")
+        plt.title("Spectral Error Reduction")
+
+        plt.show()
+
+
+    def plot_psd(self, error_nc=None):
+        f, Ps = welch(self.source, self.ad.fs)
+        _, Pc = welch(self.error_log[:self.log_pos], self.ad.fs)
+
+        plt.figure(figsize=(8,4))
+
+        plt.semilogx(f, 10 * np.log10(Ps + 1e-20), label="Source")
+        plt.semilogx(f, 10 * np.log10(Pc + 1e-20), label="Error ANC")
+
+        if error_nc is not None:
+            _, Pnc = welch(error_nc, self.ad.fs)
+            plt.semilogx(
+                f, 10 * np.log10(Pnc + 1e-20), label="Error No ANC")
+
+        plt.grid(True, which="both")
+        plt.legend()
+
+        plt.xlabel("Frequency [Hz]")
+        plt.ylabel("PSD [dB]")
+        plt.title("Signal Spectra")
+
+        plt.show()
+
+
     def all_plots(self, error_nc=None, title_ext=''):
         self.plot_error_mic(error_nc, title_ext)
-        self.plot_rms(error_nc, title_ext)
+        if error_nc is not None:
+            self.plot_error_reduction(error_nc, title_ext)
+        self.plot_psd(error_nc)
         self.plot_w_norm(title_ext)
 
 
