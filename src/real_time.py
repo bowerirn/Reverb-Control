@@ -2,6 +2,7 @@ import numpy as np
 import sounddevice as sd
 from scipy.signal import lfilter
 import matplotlib.pyplot as plt
+from . import lms_rt_ext
 
 class RealtimeFxLMS:
     def __init__(
@@ -40,14 +41,14 @@ class RealtimeFxLMS:
         # State for filtering ref through secondary path
         self.zi = np.zeros(len(self.ir) - 1, dtype=np.float32)
 
+        self.heads = np.zeros(1, dtype=np.int32) # for lms ring buffers in cpp
+
         N = len(self.source)
         self.error_log = np.zeros(N, dtype=np.float32)
         self.cancel_log = np.zeros(N, dtype=np.float32)
         self.log_pos = 0
         
-        num_blocks = int(np.ceil(len(self.source) / self.block_size) + 10) # safety
-        self.w_norm_log = np.zeros(num_blocks, dtype=np.float32)
-        self.block_pos = 0
+        self.w_norm_log = []
 
         self.pos = 0
         self.step = 0
@@ -84,66 +85,71 @@ class RealtimeFxLMS:
         max_norm=1.0
     ):
         
-        def _nlms_update(
-            ref_block, 
-            cancel_block, 
-            xf_block, 
-            error_block, 
-            frames, 
-            step_size, 
-            decay
-        ):
-            for n in range(frames):
-                # Update raw reference delay line
-                self.x[1:] = self.x[:-1] # is ring buffer faster here?
-                self.x[0] = ref_block[n]
+        
+        
+        # def _nlms_update(
+        #     ref_block, 
+        #     cancel_block, 
+        #     xf_block, 
+        #     error_block, 
+        #     frames, 
+        #     step_size, 
+        #     decay
+        # ):
+        #     for n in range(frames):
+        #         # Update raw reference delay line
+        #         self.x[1:] = self.x[:-1] # is ring buffer faster here?
+        #         self.x[0] = ref_block[n]
 
 
-                # Controller output: y = w^T x
-                y = np.dot(self.w, self.x)
+        #         # Controller output: y = w^T x
+        #         y = np.dot(self.w, self.x)
 
-                # Send opposite sign to cancel
-                cancel_block[n] = -cancel_gain * y
+        #         # Send opposite sign to cancel
+        #         cancel_block[n] = -cancel_gain * y
 
-                # Update filtered-reference delay line
-                old = self.xf[-1]
-                self.xf[1:] = self.xf[:-1]
-                self.xf[0] = xf_block[n]
+        #         # Update filtered-reference delay line
+        #         old = self.xf[-1]
+        #         self.xf[1:] = self.xf[:-1]
+        #         self.xf[0] = xf_block[n]
 
-                e = error_block[n]
+        #         e = error_block[n]
 
-                self.norm_sq += self.xf[0]**2 - old**2
-                norm = self.eps + self.norm_sq
+        #         self.norm_sq += self.xf[0]**2 - old**2
+        #         norm = self.eps + self.norm_sq
 
-                mu = step_size * e / norm
-                self.w *= decay
-                self.w += mu * self.xf
+        #         mu = step_size * e / norm
+        #         self.w *= decay
+        #         self.w += mu * self.xf
 
-        def _lms_update(
-            ref_block, 
-            cancel_block, 
-            xf_block, 
-            error_block, 
-            frames, 
-            step_size, 
-            decay
-        ):
-            for n in range(frames):
-                self.x[1:] = self.x[:-1] # is ring buffer faster here?
-                self.x[0] = ref_block[n]
+        # def _lms_update(
+        #     ref_block, 
+        #     cancel_block, 
+        #     xf_block, 
+        #     error_block, 
+        #     frames, 
+        #     step_size, 
+        #     decay
+        # ):
+        #     for n in range(frames):
+        #         self.x[1:] = self.x[:-1] # is ring buffer faster here?
+        #         self.x[0] = ref_block[n]
 
-                y = np.dot(self.w, self.x)
+        #         y = np.dot(self.w, self.x)
 
-                cancel_block[n] = -cancel_gain * y
+        #         cancel_block[n] = -cancel_gain * y
 
-                self.xf[1:] = self.xf[:-1]
-                self.xf[0] = xf_block[n]
+        #         self.xf[1:] = self.xf[:-1]
+        #         self.xf[0] = xf_block[n]
 
-                e = error_block[n]
+        #         e = error_block[n]
 
-                mu = step_size * e
-                self.w *= decay
-                self.w += mu * self.xf
+        #         mu = step_size * e
+        #         self.w *= decay
+        #         self.w += mu * self.xf
+
+        if max_norm is None:
+            max_norm = 0.0
 
         def callback(indata, outdata, frames, time, status):
             if status:
@@ -170,32 +176,38 @@ class RealtimeFxLMS:
             self.step += 1
             step_size = step_fn(self.step)
 
-            decay = 1 - leak
-
             if nlms:
-                _nlms_update(
-                    ref_block, 
-                    cancel_block, 
-                    xf_block, 
-                    error_block, 
-                    frames, 
-                    step_size, 
-                    decay
+                w_norm = lms_rt_ext.nlms_realtime_update(
+                    ref_block,
+                    xf_block.astype(np.float32, copy=False),
+                    error_block,
+                    self.x,
+                    self.xf,
+                    cancel_block,
+                    self.w,
+                    self.heads,
+                    float(step_size),
+                    float(leak),
+                    float(cancel_gain),
+                    float(self.eps),
+                    float(max_norm),
                 )
             else:
-                _lms_update(
-                    ref_block, 
-                    cancel_block, 
-                    xf_block, 
-                    error_block, 
-                    frames, 
-                    step_size, 
-                    decay
+                w_norm = lms_rt_ext.lms_realtime_update(
+                    ref_block,
+                    xf_block.astype(np.float32, copy=False),
+                    error_block,
+                    self.x,
+                    self.xf,
+                    cancel_block,
+                    self.w,
+                    self.heads,
+                    float(step_size),
+                    float(leak),
+                    float(cancel_gain),
+                    float(self.eps),
+                    float(max_norm),
                 )
-
-            w_norm = np.linalg.norm(self.w)
-            if w_norm > max_norm:
-                self.w *= max_norm / w_norm
 
             cancel_block = np.clip(cancel_block, -0.1, 0.1)
 
@@ -206,8 +218,7 @@ class RealtimeFxLMS:
             self.cancel_log[self.log_pos:end] = cancel_block[:ncopy]
             self.log_pos = end
 
-            self.w_norm_log[self.block_pos] = w_norm
-            self.block_pos += 1
+            self.w_norm_log.append(w_norm)
 
             outdata[:, 0] = cancel_block
             outdata[:, 1] = source_block
@@ -253,7 +264,7 @@ class RealtimeFxLMS:
 
         cancel = self.cancel_log[:self.log_pos]
         error = self.error_log[:self.log_pos]
-        w_norm_log = self.w_norm_log[:self.block_pos]
+        w_norm_log = np.asarray(self.w_norm_log)
 
         title_ext = f'{"{"}step={step_fn(0):1.1e}, c_gain={cancel_gain}, leak={leak:1.1e}{", fx" if fx else ""}{", nlms" if nlms else ""}{", source" if clean_source else ''}{"}"}'
 
@@ -307,7 +318,7 @@ class RealtimeFxLMS:
 
     def plot_w_norm(self, title_ext=''):
         plt.figure(figsize=(8, 4))
-        plt.plot(self.w_norm_log[:self.block_pos])
+        plt.plot(np.asarray(self.w_norm_log))
         plt.xlabel("Update Step")
         plt.ylabel(r"$||w||_2$")
         plt.title(f"Adaptive Filter Weight Norm {title_ext}")

@@ -8,6 +8,13 @@ ext_modules = [
         include_dirs=[pybind11.get_include()],
         language="c++",
         extra_compile_args=["-O3", "-std=c++17", "-march=native"],
+    ),
+    Extension(
+        "src.lms_rt_ext",
+        ["src/rt_lms.cpp"],
+        include_dirs=[pybind11.get_include()],
+        language="c++",
+        extra_compile_args=["-O3", "-std=c++17", "-march=native"],
     )
 ]
 
