@@ -42,7 +42,7 @@ class RealtimeFxLMS:
         # State for filtering ref through secondary path
         self.zi = np.zeros(len(self.ir) - 1, dtype=np.float32)
 
-        self.heads = np.zeros(1, dtype=np.int32) # for lms ring buffers in cpp
+        self.heads = np.zeros(2, dtype=np.int32) # for lms ring buffers in cpp
 
         N = len(self.source)
         self.error_log = np.zeros(N, dtype=np.float32)
@@ -80,6 +80,7 @@ class RealtimeFxLMS:
         clean_source=True, 
         fx=True, 
         nlms=True, 
+        adapt_delay=0,
         leak=1e-5, 
         source_gain=1.0, 
         cancel_gain=0.3,
@@ -187,6 +188,7 @@ class RealtimeFxLMS:
                     cancel_block,
                     self.w,
                     self.heads,
+                    int(adapt_delay),
                     float(step_size),
                     float(leak),
                     float(cancel_gain),
@@ -203,6 +205,7 @@ class RealtimeFxLMS:
                     cancel_block,
                     self.w,
                     self.heads,
+                    int(adapt_delay),
                     float(step_size),
                     float(leak),
                     float(cancel_gain),
@@ -233,6 +236,7 @@ class RealtimeFxLMS:
         clean_source=True, 
         fx=True, 
         nlms=True, 
+        adapt_delay=0,
         step_fn=0.01, 
         leak=1e-5, 
         source_gain=1.0, 
@@ -254,6 +258,7 @@ class RealtimeFxLMS:
                 clean_source=clean_source, 
                 fx=fx, 
                 nlms=nlms, 
+                adapt_delay=adapt_delay,
                 leak=leak, 
                 source_gain=source_gain, 
                 cancel_gain=cancel_gain,
