@@ -60,6 +60,43 @@ def measure_ir(ad: AudioDevice, duration=6.0, f0=150, f1=22000, player_channel=0
 
 
 
+
+def measure_ir_stream(
+    ad: AudioDevice,
+    duration=6.0,
+    f0=150,
+    f1=22000,
+    player_channel=0,
+    silence=4.0,
+    block_size=64,
+):
+    if player_channel not in (0, 1):
+        raise ValueError("player_channel must be 0 or 1")
+
+    sweep = make_sweep(ad.fs, duration, f0, f1)
+
+    decay_silence = np.zeros(int(ad.fs * silence), dtype=np.float32)
+    play_signal = np.concatenate([sweep, decay_silence])
+
+    out0 = np.zeros(len(play_signal), dtype=np.float32)
+    out1 = np.zeros(len(play_signal), dtype=np.float32)
+
+    if player_channel == 0:
+        out0[:len(sweep)] = sweep
+    else:
+        out1[:len(sweep)] = sweep
+
+    error_mic, ref_mic = ad.stream_play_record(
+        out0, out1, block_size=block_size,
+    )
+
+    error_ir = estimate_ir(error_mic, sweep, ad.fs, f0, f1)
+    ref_ir = estimate_ir(ref_mic, sweep, ad.fs, f0, f1)
+
+    return error_ir, ref_ir
+
+
+
 def align_ir_by_distance(ir, distance_cm, ir_len=128, fs=48000):
     sound_speed = 343.0
 

@@ -1,6 +1,6 @@
 import numpy as np
 import sounddevice as sd
-from scipy.signal import lfilter, coherence, welch
+from scipy.signal import lfilter, coherence, welch, correlate
 import matplotlib.pyplot as plt
 
 from . import lms_rt_ext
@@ -27,15 +27,19 @@ class RealtimeFxLMS:
 
         self.ir = ir
 
+        self.delay_ms = None
         self.reset()
 
-    def reset(self):
+    def reset(self, lag=0):
+        self.adapt_delay = lag
+        self.control_delay = self.adapt_delay   # TODO: calculate true delay here?
+
         # Adaptive filter weights
         self.w = np.zeros(self.M, dtype=np.float32)
 
         # Delay lines
-        self.x = np.zeros(self.M, dtype=np.float32)       # raw reference buffer
-        self.xf = np.zeros(self.M, dtype=np.float32)      # filtered-reference buffer
+        self.x = np.zeros(self.M + self.control_delay, dtype=np.float32)       # raw reference buffer
+        self.xf = np.zeros(self.M + self.adapt_delay, dtype=np.float32)      # filtered-reference buffer
 
         self.norm_sq = np.dot(self.xf, self.xf)
 
@@ -80,11 +84,11 @@ class RealtimeFxLMS:
         clean_source=True, 
         fx=True, 
         nlms=True, 
-        adapt_delay=0,
         leak=1e-5, 
         source_gain=1.0, 
         cancel_gain=0.3,
-        max_norm=1.0
+        w_update_sign=1.0,
+        max_norm=1.0,
     ):
         
         
@@ -154,6 +158,9 @@ class RealtimeFxLMS:
             max_norm = 0.0
 
         def callback(indata, outdata, frames, time, status):
+            self.delay_ms = time.outputBufferDacTime - time.inputBufferAdcTime
+            
+
             if status:
                 print(status)
 
@@ -178,40 +185,25 @@ class RealtimeFxLMS:
             self.step += 1
             step_size = step_fn(self.step)
 
-            if nlms:
-                w_norm = lms_rt_ext.nlms_realtime_update(
-                    ref_block,
-                    xf_block.astype(np.float32, copy=False),
-                    error_block,
-                    self.x,
-                    self.xf,
-                    cancel_block,
-                    self.w,
-                    self.heads,
-                    int(adapt_delay),
-                    float(step_size),
-                    float(leak),
-                    float(cancel_gain),
-                    float(self.eps),
-                    float(max_norm),
-                )
-            else:
-                w_norm = lms_rt_ext.lms_realtime_update(
-                    ref_block,
-                    xf_block.astype(np.float32, copy=False),
-                    error_block,
-                    self.x,
-                    self.xf,
-                    cancel_block,
-                    self.w,
-                    self.heads,
-                    int(adapt_delay),
-                    float(step_size),
-                    float(leak),
-                    float(cancel_gain),
-                    float(self.eps),
-                    float(max_norm),
-                )
+            update = lms_rt_ext.nlms_realtime_update if nlms else lms_rt_ext.lms_realtime_update
+            w_norm = update(
+                ref_block,
+                xf_block.astype(np.float32, copy=False),
+                error_block,
+                self.x,
+                self.xf,
+                cancel_block,
+                self.w,
+                self.heads,
+                float(step_size),
+                float(leak),
+                float(cancel_gain),
+                float(w_update_sign),
+                float(self.eps),
+                float(max_norm),
+                int(self.adapt_delay),
+                int(self.control_delay),
+            )
 
             cancel_block = np.clip(cancel_block, -0.1, 0.1)
 
@@ -236,11 +228,11 @@ class RealtimeFxLMS:
         clean_source=True, 
         fx=True, 
         nlms=True, 
-        adapt_delay=0,
         step_fn=0.01, 
         leak=1e-5, 
         source_gain=1.0, 
         cancel_gain=0.3,
+        w_update_sign=1.0,
         max_norm=1.0, 
     ):
         if isinstance(step_fn, (int, float)):
@@ -258,10 +250,10 @@ class RealtimeFxLMS:
                 clean_source=clean_source, 
                 fx=fx, 
                 nlms=nlms, 
-                adapt_delay=adapt_delay,
                 leak=leak, 
                 source_gain=source_gain, 
                 cancel_gain=cancel_gain,
+                w_update_sign=w_update_sign,
                 max_norm=max_norm, 
             ),
         ):
@@ -275,6 +267,19 @@ class RealtimeFxLMS:
         title_ext = f'{"{"}step={step_fn(0):1.1e}, c_gain={cancel_gain}, leak={leak:1.1e}{", fx" if fx else ""}{", nlms" if nlms else ""}{", source" if clean_source else ''}{"}"}'
 
         return error, cancel, w_norm_log, title_ext
+    
+
+    def empirical_delay(self):
+        err = self.error_log[:self.log_pos]
+        src = self.source[:self.log_pos]
+
+        corr = correlate(err, src, mode='full')
+        lags = np.arange(-len(src)+1, len(err))
+
+        lag = lags[np.argmax(np.abs(corr))]
+        print("Lag from cross-correlation:", lag)
+        print('Delay from device:', round(self.delay_ms * self.ad.fs))
+        return lag
     
     
 
@@ -332,12 +337,22 @@ class RealtimeFxLMS:
         plt.show()
 
 
-    def plot_coherence(self):
-        f, Cxy = coherence(
-            self.source,
-            self.error_log,
-            fs=self.ad.fs,
-        )
+    def plot_coherence(self, delay=None):
+        err = self.error_log[:self.log_pos]
+        src = self.source[:self.log_pos]
+
+        if delay is None:
+            delay = self.ad.delay_samples
+        
+        if delay > 0:
+            src = src[:-delay]
+            err = err[delay:]
+
+        n = min(len(src), len(err))
+        src = src[:n]
+        err = err[:n]
+
+        f, Cxy = coherence(src, err, fs=self.ad.fs)
 
         plt.figure(figsize=(8,4))
         plt.semilogx(f, Cxy)
@@ -345,7 +360,7 @@ class RealtimeFxLMS:
         plt.grid(True, which="both")
         plt.xlabel("Frequency [Hz]")
         plt.ylabel("Coherence")
-        plt.title("Reference → Error Mic Coherence")
+        plt.title(f"Reference → Error Mic Coherence, delay={delay}")
         plt.show()
 
 
@@ -398,7 +413,7 @@ class RealtimeFxLMS:
     def all_plots(self, error_nc=None, title_ext=''):
         self.plot_error_mic(error_nc, title_ext)
         if error_nc is not None:
-            self.plot_error_reduction(error_nc, title_ext)
+            self.plot_error_reduction(error_nc)
         self.plot_psd(error_nc)
         self.plot_w_norm(title_ext)
 
