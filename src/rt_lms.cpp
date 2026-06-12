@@ -100,7 +100,7 @@ float nlms_realtime_update(
     const float decay = 1.0f - leak;
 
     for (int n = 0; n < T; n++) {
-        raw_head = (raw_head == 0) ? M - 1 : raw_head - 1;
+        raw_head = (raw_head == 0) ? Mr - 1 : raw_head - 1;
         filt_head = (filt_head == 0) ? Mf - 1 : filt_head - 1;
 
         x_ptr[raw_head] = ref_ptr[n];
@@ -112,7 +112,7 @@ float nlms_realtime_update(
         float y = 0.0f;
         for (int k = 0; k < M; k++) {
             int idx = output_head + k;
-            if (idx >= M) idx -= M;
+            if (idx >= Mr) idx -= Mr;
             y += w_ptr[k] * x_ptr[idx];
         }
 
@@ -213,7 +213,7 @@ float lms_realtime_update(
     const float decay = 1.0f - leak;
 
     for (int n = 0; n < T; n++) {
-        raw_head = (raw_head == 0) ? M - 1 : raw_head - 1;
+        raw_head = (raw_head == 0) ? Mr - 1 : raw_head - 1;
         filt_head = (filt_head == 0) ? Mf - 1 : filt_head - 1;
 
         x_ptr[raw_head] = ref_ptr[n];
@@ -225,7 +225,7 @@ float lms_realtime_update(
         float y = 0.0f;
         for (int k = 0; k < M; k++) {
             int idx = output_head + k;
-            if (idx >= M) idx -= M;
+            if (idx >= Mr) idx -= Mr;
             y += w_ptr[k] * x_ptr[idx];
         }
 

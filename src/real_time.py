@@ -14,25 +14,43 @@ class RealtimeFxLMS:
         block_size=1024,
         filter_order=256,
         eps=1e-8,
+        run_nc=True
     ):
         self.ad = audio_device
         self.fs = self.ad.fs
-        self.block_size = block_size
-        self.M = filter_order
         self.eps = eps
 
         self.source = source
         if self.source.ndim > 1:
             self.source = self.source[:, 0]
 
-        self.ir = ir
-
         self.delay_ms = None
-        self.reset()
 
-    def reset(self, lag=0):
+        self.reset(block_size=block_size, filter_order=filter_order, ir=ir)
+
+        if run_nc:
+            self.error_nc, *_ = self.run(source_gain=1.0, cancel_gain=0.0)
+            self.error_nc = self.error_nc[:self.log_pos]
+            self.rms_nc = np.sqrt(np.mean(self.error_nc**2))
+            self.full_lag, self.system_lag = self.empirical_delay()
+
+
+    @property
+    def db_reduction(self):
+        rms = np.sqrt(np.mean(self.error_log[:self.log_pos]**2))
+        return 20 * np.log10(rms / self.rms_nc)
+
+    def reset(self, lag=0, block_size=None, filter_order=None, ir=None):
+        if block_size is not None:
+            self.block_size = block_size
+        if filter_order is not None:
+            self.M = filter_order
+        if ir is not None:
+            self.ir = ir
+
+
         self.adapt_delay = lag
-        self.control_delay = self.adapt_delay   # TODO: calculate true delay here?
+        self.control_delay = 0   # TODO: calculate true delay here?
 
         # Adaptive filter weights
         self.w = np.zeros(self.M, dtype=np.float32)
@@ -205,7 +223,7 @@ class RealtimeFxLMS:
                 int(self.control_delay),
             )
 
-            cancel_block = np.clip(cancel_block, -0.1, 0.1)
+            # cancel_block = np.clip(cancel_block, -0.1, 0.1)
 
             end = min(self.log_pos + frames, len(self.error_log))
             ncopy = end - self.log_pos
@@ -234,10 +252,15 @@ class RealtimeFxLMS:
         cancel_gain=0.3,
         w_update_sign=1.0,
         max_norm=1.0, 
+        fixed_w = None,
     ):
         if isinstance(step_fn, (int, float)):
             step_size = float(step_fn)
             step_fn = lambda _: step_size
+
+        if fixed_w is not None:
+            self.w = fixed_w
+            step_fn = lambda _: 0.0
 
         with sd.Stream(
             samplerate=self.fs,
@@ -277,17 +300,18 @@ class RealtimeFxLMS:
         lags = np.arange(-len(src)+1, len(err))
 
         lag = lags[np.argmax(np.abs(corr))]
+        system_delay = round(self.delay_ms * self.ad.fs)
         print("Lag from cross-correlation:", lag)
-        print('Delay from device:', round(self.delay_ms * self.ad.fs))
-        return lag
+        print('Delay from device:', system_delay)
+        return lag, system_delay
     
     
 
-    def plot_error_mic(self, error_nc=None, title_ext=''):
+    def plot_error_mic(self, title_ext=''):
         plt.figure(figsize=(10, 4))
 
-        if error_nc is not None:
-            plt.plot(error_nc, alpha=0.8, label="No Cancel")
+        if self.error_nc is not None:
+            plt.plot(self.error_nc, alpha=0.8, label="No Cancel")
 
         plt.plot(self.error_log[:self.log_pos], alpha=0.8, label="With Cancel")
 
@@ -305,15 +329,15 @@ class RealtimeFxLMS:
         x = x[:n * self.block_size].reshape(n, self.block_size)
         return np.sqrt(np.mean(x**2, axis=1))
     
-    def plot_rms(self, error_nc=None, title_ext=''):
-        if error_nc is not None:
-            err_rms_nc = self._block_rms(error_nc)
+    def plot_rms(self, title_ext=''):
+        if self.error_nc is not None:
+            err_rms_nc = self._block_rms(self.error_nc)
 
         err_rms = self._block_rms(self.error_log[:self.log_pos])
 
         plt.figure(figsize=(8, 4))
 
-        if error_nc is not None:
+        if self.error_nc is not None:
             plt.plot(err_rms_nc, label="No Cancel")
 
         plt.plot(err_rms, label="With Cancel")
@@ -364,6 +388,33 @@ class RealtimeFxLMS:
         plt.show()
 
 
+
+    def plot_cumulative_error_reduction(self):
+        err = self.error_log[:self.log_pos]
+
+        n = min(len(err), len(self.error_nc))
+        err = err[:n]
+        nc = self.error_nc[:n]
+
+        e2 = np.cumsum(err**2)
+        n2 = np.cumsum(nc**2)
+
+        reduction_db = 10 * np.log10((e2 + 1e-20) / (n2 + 1e-20))
+
+        t = np.arange(n) / self.ad.fs
+
+        plt.figure(figsize=(8, 4))
+        plt.plot(t, reduction_db)
+        plt.axhline(0, ls="--")
+        plt.grid(True)
+
+        plt.xlabel("Time [s]")
+        plt.ylabel("Cumulative ANC / No ANC [dB]")
+        plt.title("Cumulative Error Reduction Over Time")
+
+        plt.show()
+
+
     def plot_error_reduction(self, error_nc):
         f, Pc = welch(self.error_log[:self.log_pos], self.ad.fs)
         _, Pnc = welch(error_nc, self.ad.fs)
@@ -386,7 +437,7 @@ class RealtimeFxLMS:
         plt.show()
 
 
-    def plot_psd(self, error_nc=None):
+    def plot_psd(self):
         f, Ps = welch(self.source, self.ad.fs)
         _, Pc = welch(self.error_log[:self.log_pos], self.ad.fs)
 
@@ -395,8 +446,8 @@ class RealtimeFxLMS:
         plt.semilogx(f, 10 * np.log10(Ps + 1e-20), label="Source")
         plt.semilogx(f, 10 * np.log10(Pc + 1e-20), label="Error ANC")
 
-        if error_nc is not None:
-            _, Pnc = welch(error_nc, self.ad.fs)
+        if self.error_nc is not None:
+            _, Pnc = welch(self.error_nc, self.ad.fs)
             plt.semilogx(
                 f, 10 * np.log10(Pnc + 1e-20), label="Error No ANC")
 
@@ -410,11 +461,12 @@ class RealtimeFxLMS:
         plt.show()
 
 
-    def all_plots(self, error_nc=None, title_ext=''):
-        self.plot_error_mic(error_nc, title_ext)
-        if error_nc is not None:
-            self.plot_error_reduction(error_nc)
-        self.plot_psd(error_nc)
+    def all_plots(self, title_ext=''):
+        self.plot_error_mic(title_ext)
+        if self.error_nc is not None:
+            self.plot_error_reduction()
+            self.plot_cumulative_error_reduction()
+        self.plot_psd()
         self.plot_w_norm(title_ext)
 
 
