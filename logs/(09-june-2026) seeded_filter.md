@@ -7,8 +7,8 @@ These were the most promising indices:
 
 d=96,  sign=+1, c_gain=0.2  -> -1.25 dB
 d=104, sign=+1, c_gain=0.2  -> -1.71 dB
-d=144, sign=-1, c_gain=0.2  -> -1.45 dB
 d=136, sign=-1, c_gain=0.2  -> -1.01 dB
+d=144, sign=-1, c_gain=0.2  -> -1.45 dB
 
 After that, I tried using the 104 seed and letting fxnlms learn the filter from there. 
 This time, it actually worked! 
