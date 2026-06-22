@@ -3,6 +3,7 @@ os.environ["SD_ENABLE_ASIO"] = "1"
 
 import sounddevice as sd
 import numpy as np
+import gc
 
 def get_asio_device(name_contains="focusrite"):
     devices = sd.query_devices()
@@ -16,11 +17,28 @@ def get_asio_device(name_contains="focusrite"):
     raise RuntimeError(f"{name_contains} ASIO device not found")
 
 class AudioDevice:
-    def __init__(self, fs=48000, device=None):
+    def __init__(self, fs=48_000, device=None):
+
+        self.system_delay_ms = 89.83333327341825
+
+        self.available_samplerates = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000]
+        self.available_buffer_sizes = [16, 32, 48, 64, 96, 128, 160, 192, 256, 512, 1024]
+        self.device_latencies_s = [.0049, .0055, .0062, .0079, .0092, .0145, .0179, .0192, .0259, .0465, .0899]
+
         self.fs = fs
+        if self.fs not in self.available_samplerates:
+            self.fs = 48_000
+            print(f"Sample rate of {fs} is not available, defaulting to 48kHz.\nAvailable sample rates are: [44.1kHz, 48kHz, 88.2kHz, 96kHz, 176.4kHz, 192KhZ]")
 
-        self.delay_ms = 0.08983333327341825
 
+        self.per_buffer_latency_s = {
+            buffer_size: latency_s
+            for buffer_size, latency_s in zip(
+                self.available_buffer_sizes,
+                self.device_latencies_s
+            )
+        }
+        
         if device is not None:
             self.device = device
         else:
@@ -31,7 +49,7 @@ class AudioDevice:
 
     @property
     def delay_samples(self):
-        return self.delay_ms * self.fs
+        return self.delay_ms * (self.fs / 1000)
 
     def play(self, panel_out=None, source_out=None, dtype=np.float32, blocking=True):
         if panel_out is None:
@@ -51,7 +69,7 @@ class AudioDevice:
             channels=2,
             device=self.device,
             dtype=dtype,
-            blocking=blocking
+            blocking=blocking,
         )
 
         error_mic = rec[:, 0]
@@ -60,49 +78,22 @@ class AudioDevice:
         return error_mic, reference_mic
     
 
-    def stream_play_record(self, out0, out1, block_size=64):
-        assert len(out0) == len(out1)
-
-        N = len(out0)
-        rec = np.zeros((N, 2), dtype=np.float32)
-        pos = 0
-        done = False
-
-        out0 = np.asarray(out0, dtype=np.float32)
-        out1 = np.asarray(out1, dtype=np.float32)
-
-        def callback(indata, outdata, frames, time, status):
-            self.delay_ms = time.outputBufferDacTime - time.inputBufferAdcTime
-
-            nonlocal pos, done
-
-            if status:
-                print(status)
-
-            end = pos + frames
-            ncopy = max(0, min(end, N) - pos)
-
-            outdata[:] = 0.0
-
-            if ncopy > 0:
-                outdata[:ncopy, 0] = out0[pos:pos+ncopy]
-                outdata[:ncopy, 1] = out1[pos:pos+ncopy]
-                rec[pos:pos+ncopy, :] = indata[:ncopy, :]
-
-            pos = end
-
-            if pos >= N:
-                done = True
+    def stream(self, callback, block_size=192, dtype="float32"):
+        assert block_size in self.available_buffer_sizes, f"Device does not support block size of {block_size}. Please use one of: {str(self.available_buffer_sizes)}"
 
         with sd.Stream(
             samplerate=self.fs,
             blocksize=block_size,
             device=self.device,
             channels=(2, 2),
-            dtype="float32",
+            dtype=dtype,
+            latency=(0.0, 0.0),
             callback=callback,
-        ):
-            while not done:
-                sd.sleep(50)
+        ) as stream:
+            while stream.active:
+                sd.sleep(100)
+        
+        gc.collect()
 
-        return rec[:, 0], rec[:, 1]
+    def stop_stream(self):
+        raise sd.CallbackStop()

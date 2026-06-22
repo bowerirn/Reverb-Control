@@ -45,7 +45,7 @@ float nlms_realtime_update(
     float eps,
     float max_norm,
     int adapt_delay,
-    int control_delay
+    bool cpp_filter
 ) {
     auto ref_buf = ref.request();
     auto xf_in_buf = filtered_ref.request();
@@ -68,7 +68,6 @@ float nlms_realtime_update(
     const int T = static_cast<int>(ref_buf.shape[0]);
     const int M = static_cast<int>(w_buf.shape[0]);
     const int Mf = static_cast<int>(xf_buf.shape[0]);
-    const int Mr = static_cast<int>(x_buf.shape[0]);
 
 
     if (xf_in_buf.shape[0] != T || err_buf.shape[0] != T || cancel_buf.shape[0] != T) {
@@ -76,9 +75,6 @@ float nlms_realtime_update(
     }
     if (Mf < M + adapt_delay) {
         throw std::runtime_error("x_filt length must be at least M + adapt_delay");
-    }
-    if (Mr < M + control_delay) {
-        throw std::runtime_error("x length must be at least M + control_delay");
     }
     if (heads_buf.shape[0] < 2) {
         throw std::runtime_error("heads must have length at least 2");
@@ -97,22 +93,26 @@ float nlms_realtime_update(
     int raw_head = heads_ptr[0];
     int filt_head = heads_ptr[1];
 
+    if (cpp_filter) {
+        //TODO: lfilter
+    }
+
     const float decay = 1.0f - leak;
 
     for (int n = 0; n < T; n++) {
-        raw_head = (raw_head == 0) ? Mr - 1 : raw_head - 1;
+        raw_head = (raw_head == 0) ? M - 1 : raw_head - 1;
         filt_head = (filt_head == 0) ? Mf - 1 : filt_head - 1;
 
         x_ptr[raw_head] = ref_ptr[n];
         xf_ptr[filt_head] = xf_in_ptr[n];
 
-        int output_head = raw_head + control_delay;
-        while (output_head >= Mr) output_head -= Mr;
+        int output_head = raw_head;
+        while (output_head >= M) output_head -= M;
 
         float y = 0.0f;
         for (int k = 0; k < M; k++) {
             int idx = output_head + k;
-            if (idx >= Mr) idx -= Mr;
+            if (idx >= M) idx -= M;
             y += w_ptr[k] * x_ptr[idx];
         }
 
@@ -159,7 +159,7 @@ float lms_realtime_update(
     float eps,
     float max_norm,
     int adapt_delay,
-    int control_delay
+    bool cpp_filter
 ) {
     auto ref_buf = ref.request();
     auto xf_in_buf = filtered_ref.request();
@@ -182,16 +182,12 @@ float lms_realtime_update(
     const int T = static_cast<int>(ref_buf.shape[0]);
     const int M = static_cast<int>(w_buf.shape[0]);
     const int Mf = static_cast<int>(xf_buf.shape[0]);
-    const int Mr = static_cast<int>(x_buf.shape[0]);
 
     if (xf_in_buf.shape[0] != T || err_buf.shape[0] != T || cancel_buf.shape[0] != T) {
         throw std::runtime_error("ref, filtered_ref, error_mic, and cancel must have same length");
     }
     if (Mf < M + adapt_delay) {
         throw std::runtime_error("x_filt length must be at least M + adapt_delay");
-    }
-    if (Mr < M + control_delay) {
-        throw std::runtime_error("x length must be at least M + control_delay");
     }
     if (heads_buf.shape[0] < 2) {
         throw std::runtime_error("heads must have length at least 2");
@@ -210,22 +206,26 @@ float lms_realtime_update(
     int raw_head = heads_ptr[0];
     int filt_head = heads_ptr[1];
 
+    if (cpp_filter) {
+        //TODO: lfilter
+    }
+
     const float decay = 1.0f - leak;
 
     for (int n = 0; n < T; n++) {
-        raw_head = (raw_head == 0) ? Mr - 1 : raw_head - 1;
+        raw_head = (raw_head == 0) ? M - 1 : raw_head - 1;
         filt_head = (filt_head == 0) ? Mf - 1 : filt_head - 1;
 
         x_ptr[raw_head] = ref_ptr[n];
         xf_ptr[filt_head] = xf_in_ptr[n];
 
-        int output_head = raw_head + control_delay;
-        while (output_head >= Mr) output_head -= Mr;
+        int output_head = raw_head;
+        while (output_head >= M) output_head -= M;
 
         float y = 0.0f;
         for (int k = 0; k < M; k++) {
             int idx = output_head + k;
-            if (idx >= Mr) idx -= Mr;
+            if (idx >= M) idx -= M;
             y += w_ptr[k] * x_ptr[idx];
         }
 
@@ -268,7 +268,7 @@ PYBIND11_MODULE(lms_rt_ext, m) {
         py::arg("eps") = 1e-8f,
         py::arg("max_norm") = 0.0f,
         py::arg("adapt_delay") = 0,
-        py::arg("control_delay") = 0
+        py::arg("cpp_filter") = false
     );
 
     m.def(
@@ -289,6 +289,6 @@ PYBIND11_MODULE(lms_rt_ext, m) {
         py::arg("eps") = 1e-8f,
         py::arg("max_norm") = 0.0f,
         py::arg("adapt_delay") = 0,
-        py::arg("control_delay") = 0
+        py::arg("cpp_filter") = false
     );
 }
