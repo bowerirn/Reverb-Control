@@ -156,7 +156,6 @@ class RealtimeFxLMS:
                 if clean_source:
                     xf_block = self.source_filt[start:end]
                 else:
-                    # later: C++ filtering
                     xf_block = self.xf_block
             else:
                 xf_block = ref_block
@@ -192,8 +191,8 @@ class RealtimeFxLMS:
             self.cancel_log[self.log_pos:end] = self.cancel_block[:ncopy]
             self.log_pos = end
 
-            # self.w_norm_log.append(w_norm)
             # maybe slow
+            # self.w_norm_log.append(w_norm)
 
             outdata[:, 0] = self.cancel_block
             outdata[:, 1] = self.source_block
@@ -209,19 +208,14 @@ class RealtimeFxLMS:
         nlms=True, 
         step_fn=0.01, 
         leak=1e-5, 
-        source_gain = None, # for legacy compatability
+        source_gain=1.0, # for legacy compatability
         cancel_gain=0.3,
         w_update_sign=1.0,
         max_norm=1.0, 
-        fixed_w = None,
     ):
         if isinstance(step_fn, (int, float)):
             step_size = float(step_fn)
             step_fn = lambda _: step_size
-
-        if fixed_w is not None:
-            self.w = fixed_w
-            step_fn = lambda _: 0.0
 
 
         self.ad.stream(
