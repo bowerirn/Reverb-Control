@@ -5,19 +5,22 @@ import sounddevice as sd
 import numpy as np
 import gc
 
-def get_asio_device(name_contains="focusrite"):
+def get_device(name_contains="focusrite"):
+    if isinstance(name_contains, int):
+        return name_contains
+    
     devices = sd.query_devices()
-    hostapis = sd.query_hostapis()
+    # hostapis = sd.query_hostapis()
 
     for i, dev in enumerate(devices):
-        hostapi_name = hostapis[dev["hostapi"]]["name"].lower()
-        if "asio" in hostapi_name and name_contains.lower() in dev["name"].lower():
+        # hostapi_name = hostapis[dev["hostapi"]]["name"].lower()
+        if name_contains.lower() in dev["name"].lower():
             return i
 
-    raise RuntimeError(f"{name_contains} ASIO device not found")
+    raise RuntimeError(f"{name_contains} device not found")
 
 class AudioDevice:
-    def __init__(self, fs=48_000, device=None):
+    def __init__(self, fs=48_000, in_device=None, out_device=None):
 
         self.system_delay_ms = 89.83333327341825
 
@@ -38,12 +41,16 @@ class AudioDevice:
                 self.device_latencies_s
             )
         }
+
         
-        if device is not None:
-            self.device = device
+        if in_device is None:
+            in_device = 'focusrite'
+        if out_device is None:
+            out_device = 'focusrite'
         else:
-            device_id = get_asio_device()
-            self.device = (device_id, device_id)
+            in_device_id = get_device(in_device)
+            out_device_id = get_device(out_device)
+            self.device = (in_device_id, out_device_id)
         
         sd.default.device = self.device
 
@@ -51,17 +58,20 @@ class AudioDevice:
     def delay_samples(self):
         return self.delay_ms * (self.fs / 1000)
 
-    def play(self, panel_out=None, source_out=None, dtype=np.float32, blocking=True):
-        if panel_out is None:
-            panel_out = np.zeros_like(source_out)
-        if source_out is None:
-            source_out = np.zeros_like(panel_out)
+    def play(self, left=None, right=None, dtype=np.float32, blocking=True):
+        if left is None and right is None:
+            return
+        
+        if left is None:
+            left = np.zeros_like(right)
+        elif right is None:
+            right = np.zeros_like(left)
 
-        assert len(panel_out) == len(source_out), "Input channels must have the same length"
+        assert len(left) == len(right), "Input channels must have the same length"
 
-        out = np.zeros((len(panel_out), 2), dtype=dtype)
-        out[:, 0] = panel_out
-        out[:, 1] = source_out
+        out = np.zeros((len(left), 2), dtype=dtype)
+        out[:, 0] = left
+        out[:, 1] = right
 
         rec = sd.playrec(
             out,

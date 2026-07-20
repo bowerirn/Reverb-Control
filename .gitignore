@@ -1,10 +1,53 @@
-.vscode
-__pycache__
+# =========================
+# Python
+# =========================
+
+.vscode/
+__pycache__/
 build/
 dist/
+
 *.pyc
 *.pyo
 *.pyd
 *.so
+
 *.egg/
 *.egg-info/
+
+.venv/
+env/
+
+# =========================
+# CCES / Eclipse
+# =========================
+
+.metadata/
+
+# Build directories
+**/Debug/
+**/Release/
+
+# Generated binaries
+*.dxe
+*.ldr
+
+# Object files
+*.doj
+*.o
+*.obj
+
+# Static libraries
+*.a
+*.dlb
+
+# Linker maps
+*.map
+
+# Dependency/listing files
+*.d
+*.lst
+
+# Windows
+Thumbs.db
+Desktop.ini
