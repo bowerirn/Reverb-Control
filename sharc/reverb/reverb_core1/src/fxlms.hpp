@@ -6,24 +6,32 @@
 
 
 template<int N>
-inline float ring_buffer_FIR(
+inline float duplicated_ring_FIR(
     float new_sample,
     const float* coeffs,
-    float* state_ring,
+    float* state,
     int* head
 ) {
-    *head = (*head == 0) ? N - 1 : *head - 1;
-    state_ring[*head] = new_sample;
+    // Move the head backward by one sample.
+    int h = *head - 1;
 
-    float y = 0.0f;
-    int len1 = N - *head;
-
-    for (int k = 0; k < len1; k++) {
-        y += coeffs[k] * state_ring[*head + k];
+    if (h < 0) {
+        h = N - 1;
     }
 
-    for (int k = len1; k < N; k++) {
-        y += coeffs[k] * state_ring[k - len1];
+    *head = h;
+
+    // Maintain two identical copies of the circular buffer.
+    state[h] = new_sample;
+    state[h + N] = new_sample;
+
+    // The complete N-sample history is now contiguous.
+    const float* contiguous_state = state + h;
+
+    float y = 0.0f;
+
+    for (int k = 0; k < N; k++) {
+        y += coeffs[k] * contiguous_state[k];
     }
 
     return y;
@@ -33,8 +41,7 @@ inline float ring_buffer_FIR(
 
 
 
-
-template<int M, int IR_LEN, bool NLMS>
+template<int M, int IR_LEN, int BLOCK_SIZE, bool NLMS>
 class FxLMS {
     
     public:
@@ -42,7 +49,8 @@ class FxLMS {
             : ir(secondary_ir),
               x_head(0),
               ir_head(0),
-              xnorm(0.0f)
+              xnorm(0.0f),
+              update(false)
         {   
             reset();
         }
@@ -52,13 +60,16 @@ class FxLMS {
             ir_head = 0;
             xnorm = 0.0f;
 
-            for (int i = 0; i < M; i++) {
+            for (int i = 0; i < M; ++i) {
                 w[i] = 0.0f;
+            }
+
+            for (int i = 0; i < 2 * M; ++i) {
                 x[i] = 0.0f;
                 xf[i] = 0.0f;
             }
 
-            for (int i = 0; i < IR_LEN; i++) {
+            for (int i = 0; i < 2 * IR_LEN; ++i) {
                 z[i] = 0.0f;
             }
         }
@@ -69,53 +80,48 @@ class FxLMS {
             }
         }
 
+
+
         float process(float ref, float error_mic) {
-            /*
-                ref:       reference mic / clean source sample
-                error_mic: current error mic sample
+            float control = -anc_cancel_gain * duplicated_ring_FIR<M>(ref, w, x, &x_head);
 
-                returns: control sample to send to panel amp
-            */
+            if (!anc_adapt || anc_mu == 0.0f) return control;
 
-            // y = w.T * x
-            float control = -anc_cancel_gain * ring_buffer_FIR<M>(ref, w, x, &x_head);
 
-            if (!anc_adapt || anc_mu == 0.0) return control;
-
-    
-
-            // filtered x
-            float xf_sample = ring_buffer_FIR<IR_LEN>(ref, ir, z, &ir_head);
+            float xf_sample = duplicated_ring_FIR<IR_LEN>(ref, ir, z, &ir_head);
 
             float step = anc_mu;
+
             if (NLMS) {
                 float old = xf[x_head];
-                xnorm += xf_sample * xf_sample - old * old;
+                xnorm += xf_sample * xf_sample- old * old;
                 step = anc_mu / (anc_eps + xnorm);
+            }
+
+            xf[x_head] = xf_sample;
+            xf[x_head + M] = xf_sample;
+
+            update = !update;
+
+            if (!update) {
+                return control;
             }
 
             float update_scale = anc_update_sign * step * error_mic;
             float decay = 1.0f - anc_leak;
-            
-    
-            xf[x_head] = xf_sample;
-            
+
             int update_head = x_head + anc_lag;
 
-            while (update_head >= M) update_head -= M;
-            int len1 = M - update_head;
-
-            // w[:len1] * x[head:]
-            for (int k = 0; k < len1; k++) {
-                w[k] = decay * w[k] + update_scale * xf[update_head + k];
+            if (update_head >= M) {
+                update_head -= M;
             }
 
-            // w[len1:] * x[:head]
-            for (int k = len1; k < M; k++) {
-                w[k] = decay * w[k] + update_scale * xf[k - len1];
+            const float* restrict xf_contiguous = xf + update_head;
+
+            for (int k = 0; k < M; k++) {
+                w[k] = w[k] + update_scale * xf_contiguous[k];
             }
 
-            
             return control;
         }
 
@@ -129,11 +135,15 @@ class FxLMS {
 
     private:
         float w[M];
-        float x[M];
-        float xf[M];
+        float x[2 * M];
+        float xf[2 * M];
+
+        bool update;
 
         const float* ir;
-        float z[IR_LEN];
+        float z[2 * IR_LEN];
+
+        float block_decay;
 
         int x_head;
         int ir_head;

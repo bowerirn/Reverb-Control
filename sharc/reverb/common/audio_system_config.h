@@ -65,10 +65,10 @@
  ******************************************************************************/
 
 // This should be a base 2 number from 8 to 128
-#define AUDIO_BLOCK_SIZE                              (8)
+#define AUDIO_BLOCK_SIZE                              (4)
 
 // Set audio sample rate
-#define AUDIO_SAMPLE_RATE                             (48000)
+#define AUDIO_SAMPLE_RATE                             (96000)
 
 // Set to true to use both cores, set to false to just use SHARC Core 1
 #define USE_BOTH_CORES_TO_PROCESS_AUDIO               FALSE
@@ -177,7 +177,7 @@
 	 */
 
 	#define   MIDI_UART_MANAGED_BY_ARM_CORE      FALSE
-	#define   MIDI_UART_MANAGED_BY_SHARC1_CORE   TRUE
+	#define   MIDI_UART_MANAGED_BY_SHARC1_CORE   FALSE
 
 #endif
 

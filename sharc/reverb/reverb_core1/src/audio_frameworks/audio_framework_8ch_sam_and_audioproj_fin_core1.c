@@ -384,6 +384,7 @@ SPORT_DMA_CONFIG SPR2_spdif_2CH_Config = {
     .generates_interrupts = false
 };
 
+
 /**
  * @brief      SHARC Core 1 handler for DMA interrupts
  *
@@ -406,7 +407,7 @@ SPORT_DMA_CONFIG SPR2_spdif_2CH_Config = {
  * if audio processing from the last block is still happening.
  *
  */
-
+/*
 void audioframework_dma_handler(uint32_t iid, void *arg){
     int i;
 
@@ -425,7 +426,7 @@ void audioframework_dma_handler(uint32_t iid, void *arg){
         tglCntr = 0;
         gpio_toggle(GPIO_SHARC_SAM_LED11);
         multicore_data->sharc_core1_led_strobed = true;
-    }
+    } // maybe we don't need this led toggle?
 
     // Increment the counter for new audio blocks
     audio_blocks_new_events_count++;
@@ -435,13 +436,13 @@ void audioframework_dma_handler(uint32_t iid, void *arg){
 
     #if (USE_BOTH_CORES_TO_PROCESS_AUDIO)
 
-    /*
-     ********************************************************************************
-     * STEP 1:
-     * Kick off transfer of output audio from SHARC 1 from last block to input audio
-     * for SHARC 2
-     ********************************************************************************
-     */
+    
+    // ********************************************************************************
+    // * STEP 1:
+    // * Kick off transfer of output audio from SHARC 1 from last block to input audio
+    // * for SHARC 2
+    // ********************************************************************************
+     
 
     // Be sure the MDMA we kicked off at the end of the last block has now completed
     while (!*pREG_DMA19_STAT & 0x1) {
@@ -478,19 +479,19 @@ void audioframework_dma_handler(uint32_t iid, void *arg){
 
     #endif    // USE_BOTH_CORES_TO_PROCESS_AUDIO
 
-    /*
+    
      ********************************************************************************
-     * Step 2:
-     * Copy / convert new fixed point ADC DMA buffers to SHARC 1 input
-     * Copy / convert DAC buffer to fixed point DAC DMA output buffers
-     ********************************************************************************
-     */
+    // * Step 2:
+    // * Copy / convert new fixed point ADC DMA buffers to SHARC 1 input
+    // * Copy / convert DAC buffer to fixed point DAC DMA output buffers
+    // ********************************************************************************
+     
 
-    /*
-     * Copy audio data to and from our fixed-point DMA buffers.  Convert to and from floating
-     * point in the process and clip audio if needed.  Use the current DMA pointers to determine
-     * which pair of buffers is not presently being transmitted / received.
-     */
+    
+    // * Copy audio data to and from our fixed-point DMA buffers.  Convert to and from floating
+    // * point in the process and clip audio if needed.  Use the current DMA pointers to determine
+    // * which pair of buffers is not presently being transmitted / received.
+     
     if (    (uint32_t)sport_dma_cfg->dma_descriptor_rx_0_list.Next_Desc !=
             (*sport_dma_cfg->pREG_DMA_RX_DSCPTR_NXT)
             )  {
@@ -523,13 +524,13 @@ void audioframework_dma_handler(uint32_t iid, void *arg){
     }
 
     #if (USE_BOTH_CORES_TO_PROCESS_AUDIO)
-    /*
-     ********************************************************************************
-     * STEP 3:
-     * Kick off transfer of output audio from SHARC 2 to buffer on SHARC 1.
-     * When this DMA completes, it will kick of an interrupt on SHARC 2.
-     ********************************************************************************
-     */
+    
+    // ********************************************************************************
+    // * STEP 3:
+    // * Kick off transfer of output audio from SHARC 2 to buffer on SHARC 1.
+    // * When this DMA completes, it will kick of an interrupt on SHARC 2.
+    // ********************************************************************************
+    
 
     // DMA Transfer from SH2 Out to SH1 In
     void *sharc_core2_src_addr  = (void *)((uint32_t)multicore_data->sharc_core2_audio_out + 0x28800000);
@@ -559,15 +560,15 @@ void audioframework_dma_handler(uint32_t iid, void *arg){
           (0x1 << BITP_DMA_CFG_INT) |                        // Generate an interrupt when complete
           0;
 
-    /*
+    
+    // ********************************************************************************
+    // * STEP 4:
+    // * Before we kick off audio processing on SHARC 1, make sure we have copied
+    // * the full output buffer from SHARC 1 to SHARC 2 (from step 1).  We don't want
+    // * to begin processing data in SHARC 1 until all of the processed data has been
+    // * moved out.
      ********************************************************************************
-     * STEP 4:
-     * Before we kick off audio processing on SHARC 1, make sure we have copied
-     * the full output buffer from SHARC 1 to SHARC 2 (from step 1).  We don't want
-     * to begin processing data in SHARC 1 until all of the processed data has been
-     * moved out.
-     ********************************************************************************
-     */
+    
     while (!*pREG_DMA9_STAT & 0x1) { }
     #endif    // USE_BOTH_CORES_TO_PROCESS_AUDIO
 
@@ -599,6 +600,105 @@ void audioframework_dma_handler(uint32_t iid, void *arg){
         *pREG_SEC0_RAISE = INTR_TRU0_INT4;
     }
 }
+*/
+void audioframework_dma_handler(uint32_t iid, void *arg){
+    int i;
+
+    // Clear DMA interrupt
+    *pREG_DMA1_STAT |= BITM_DMA_STAT_IRQDONE;
+
+    // Capture a processor cycle count for benchmarking purposes.
+    cycle_cntr = audioflow_get_cpu_cycle_counter();
+
+    // Get the configuration of the SPORT / DMA combo driving interrupts
+    SPORT_DMA_CONFIG *sport_dma_cfg = (SPORT_DMA_CONFIG *)arg;
+
+    // Toggle LED11 on the SHARC Audio Module board to show that the audio is running and we're getting interrupts
+    static uint16_t tglCntr = 0;
+    if (tglCntr++ > (AUDIO_SAMPLE_RATE / AUDIO_BLOCK_SIZE) / 2) {
+        tglCntr = 0;
+        gpio_toggle(GPIO_SHARC_SAM_LED11);
+        multicore_data->sharc_core1_led_strobed = true;
+    }
+
+    // Increment the counter for new audio blocks
+    audio_blocks_new_events_count++;
+
+    // Set flag that we are now getting audio interrupts and processing audio
+    multicore_data->sharc_core1_processing_audio = true;
+
+
+    
+    // ********************************************************************************
+    // * Step 2:
+    // * Copy / convert new fixed point ADC DMA buffers to SHARC 1 input
+    // * Copy / convert DAC buffer to fixed point DAC DMA output buffers
+    // ********************************************************************************
+     
+
+    const bool processing_buffer_0 =
+        (uint32_t)sport_dma_cfg->dma_descriptor_rx_0_list.Next_Desc !=
+        (*sport_dma_cfg->pREG_DMA_RX_DSCPTR_NXT);
+    // * Copy audio data to and from our fixed-point DMA buffers.  Convert to and from floating
+    // * point in the process and clip audio if needed.  Use the current DMA pointers to determine
+    // * which pair of buffers is not presently being transmitted / received.
+     
+    if (processing_buffer_0) {
+        audioflow_fixed_to_float(sport0_dma_rx_0_buffer, adau1761_audiochannels_in,  AUDIO_CHANNELS * AUDIO_BLOCK_SIZE);
+        audioflow_fixed_to_float(sport2_dma_rx_0_buffer, spdif_audiochannels_in, SPDIF_DMA_CHANNELS * AUDIO_BLOCK_SIZE);
+    }
+    else {
+        audioflow_fixed_to_float(sport0_dma_rx_1_buffer, adau1761_audiochannels_in,  AUDIO_CHANNELS * AUDIO_BLOCK_SIZE);
+        audioflow_fixed_to_float(sport2_dma_rx_1_buffer, spdif_audiochannels_in, SPDIF_DMA_CHANNELS * AUDIO_BLOCK_SIZE);
+    }
+
+
+    //uint64_t start = audioflow_get_cpu_cycle_counter();
+
+    processaudio_callback();
+
+    //uint64_t end = audioflow_get_cpu_cycle_counter(); // maybe do something with this later?
+
+    multicore_data->sharc_core1_cpu_load_mhz = 
+        audioflow_get_cpu_load(cycle_cntr, AUDIO_BLOCK_SIZE, CORE_CLOCK_FREQ_HZ, AUDIO_SAMPLE_RATE);
+
+    if (multicore_data->sharc_core1_cpu_load_mhz > multicore_data->sharc_core1_cpu_load_mhz_peak) {
+        multicore_data->sharc_core1_cpu_load_mhz_peak = multicore_data->sharc_core1_cpu_load_mhz;
+    }
+
+
+    #if (SAM_AUDIOPROJ_FIN_BOARD_PRESENT)
+		float amplitude = 0;
+		for (int i=0;i<AUDIO_BLOCK_SIZE;i++) {
+			amplitude += fabs(audiochannel_0_left_in[i]);
+			amplitude += fabs(audiochannel_0_right_in[i]);
+		}
+
+		amplitude *= (1.0/AUDIO_BLOCK_SIZE);
+		multicore_data->audio_in_amplitude = 20.0*log10(amplitude);
+	#endif
+
+    audio_blocks_processed_count++;
+
+
+
+
+
+    if (processing_buffer_0) {
+        audioflow_float_to_fixed(adau1761_audiochannels_out, sport0_dma_tx_0_buffer, AUDIO_CHANNELS * AUDIO_BLOCK_SIZE);
+        audioflow_float_to_fixed(spdif_audiochannels_out, sport2_dma_tx_0_buffer, SPDIF_DMA_CHANNELS * AUDIO_BLOCK_SIZE);
+    }
+    else {
+        audioflow_float_to_fixed(adau1761_audiochannels_out, sport0_dma_tx_1_buffer, AUDIO_CHANNELS * AUDIO_BLOCK_SIZE);
+        audioflow_float_to_fixed(spdif_audiochannels_out, sport2_dma_tx_1_buffer, SPDIF_DMA_CHANNELS * AUDIO_BLOCK_SIZE);
+    }
+}
+
+
+
+
+
+
 
 /**
  * @brief      SHARC Core 1 Audio callback handler
@@ -633,7 +733,7 @@ void audioframework_audiocallback_handler(uint32_t iid) {
     #endif
 
     // Call user audio processing
-    processaudio_callback();
+    // processaudio_callback();
 
     // Calculate our CPU load for this SHARC core based on our cycle counter
     multicore_data->sharc_core1_cpu_load_mhz = audioflow_get_cpu_load(cycle_cntr,
@@ -659,10 +759,10 @@ void audioframework_audiocallback_handler(uint32_t iid) {
 
 
     // Increment our counter containing number of blocks processed
-    audio_blocks_processed_count++;
+    // audio_blocks_processed_count++;
 
-    // Set flag that last audio frame has completed
-    last_audio_frame_completed = true;
+    // // Set flag that last audio frame has completed
+    // last_audio_frame_completed = true;
 }
 
 /**

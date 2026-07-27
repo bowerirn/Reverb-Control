@@ -229,29 +229,29 @@ void processaudio_setup(void)
 const int FILTER_ORDER = 512;
 const bool NLMS = true;
 
-static FxLMS<FILTER_ORDER, IR_LEN, NLMS> anc(panel_ir);
+static FxLMS<FILTER_ORDER, IR_LEN, AUDIO_BLOCK_SIZE, NLMS> anc(panel_ir);
 
 
 // When debugging audio algorithms, helpful to comment out this pragma for more linear single stepping.
 #pragma optimize_for_speed
 void processaudio_callback(void) {
 
-
    for (int i = 0; i < AUDIO_BLOCK_SIZE; i++) {
        float error_mic = audiochannel_0_left_in[i];
        float ref = audiochannel_0_right_in[i];
-
-
+//
+//
        float control = anc.process(ref, error_mic);
-
-       if (anc_off) {
-           audiochannel_0_left_out[i] = 0.0f; 
-       }
-       else {
-           audiochannel_0_left_out[i] = control;
-       }
-
-       audiochannel_0_right_out[i] = 0.0f;
+	   audiochannel_0_left_out[i] = ref;
+//
+//       if (anc_off) {
+//           audiochannel_0_left_out[i] = 0.0f;
+//       }
+//       else {
+//           audiochannel_0_left_out[i] = control;
+//       }
+//
+      audiochannel_0_right_out[i] = 0.0f;
    }
 
 
