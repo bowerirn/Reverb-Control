@@ -50,6 +50,7 @@ class FxLMS {
               x_head(0),
               ir_head(0),
               xnorm(0.0f),
+              mavg(0.0f),
               update(false)
         {   
             reset();
@@ -59,6 +60,8 @@ class FxLMS {
             x_head = 0;
             ir_head = 0;
             xnorm = 0.0f;
+            mavg = 0.0f;
+            update = false;
 
             for (int i = 0; i < M; ++i) {
                 w[i] = 0.0f;
@@ -83,23 +86,46 @@ class FxLMS {
 
 
         float process(float ref, float error_mic) {
-            float control = -anc_cancel_gain * duplicated_ring_FIR<M>(ref, w, x, &x_head);
+        	const float mu = anc_mu;
+        	const float eps = anc_eps;
+        	const float leak = anc_leak;
+        	const float cancel_gain = anc_cancel_gain;
+        	const float update_sign = anc_update_sign;
+        	const int lag = anc_lag;
+        	const bool adapt = anc_adapt;
+            const float mavg_weight = anc_mavg_weight;
+            const float ref_threshold = anc_ref_threshold;
 
-            if (!anc_adapt || anc_mu == 0.0f) return control;
+
+            float control = -cancel_gain * duplicated_ring_FIR<M>(ref, w, x, &x_head);
+
+            if (!adapt || mu == 0.0f) return control;
 
 
             float xf_sample = duplicated_ring_FIR<IR_LEN>(ref, ir, z, &ir_head);
 
-            float step = anc_mu;
-
-            if (NLMS) {
-                float old = xf[x_head];
-                xnorm += xf_sample * xf_sample- old * old;
-                step = anc_mu / (anc_eps + xnorm);
-            }
-
+            float old = xf[x_head];
+            xnorm += xf_sample * xf_sample- old * old;
+            
             xf[x_head] = xf_sample;
             xf[x_head + M] = xf_sample;
+            
+            mavg = mavg_weight * mavg + (1.0f - mavg_weight) * xnorm;
+            
+            if (mavg < ref_threshold) {
+//            	light = false;
+                return control;
+            }
+            
+//            light = true;
+
+
+            
+            float step = mu;
+            
+            if (NLMS) {
+                step = mu / (eps + xnorm);
+            }
 
             update = !update;
 
@@ -107,16 +133,16 @@ class FxLMS {
                 return control;
             }
 
-            float update_scale = anc_update_sign * step * error_mic;
-            float decay = 1.0f - anc_leak;
+            float update_scale = update_sign * step * error_mic;
+            float decay = 1.0f - leak;
 
-            int update_head = x_head + anc_lag;
+            int update_head = x_head + lag;
 
             if (update_head >= M) {
                 update_head -= M;
             }
 
-            const float* restrict xf_contiguous = xf + update_head;
+            const float* xf_contiguous = xf + update_head;
 
             for (int k = 0; k < M; k++) {
                 w[k] = w[k] + update_scale * xf_contiguous[k];
@@ -127,7 +153,7 @@ class FxLMS {
 
 
 
-        const float* weights() const {
+        const float* weights() {
             return w;
         }
 
@@ -149,6 +175,7 @@ class FxLMS {
         int ir_head;
 
         float xnorm;
+        float mavg;
 
 };
 

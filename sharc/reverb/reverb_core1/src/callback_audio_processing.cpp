@@ -239,19 +239,25 @@ void processaudio_callback(void) {
    for (int i = 0; i < AUDIO_BLOCK_SIZE; i++) {
        float error_mic = audiochannel_0_left_in[i];
        float ref = audiochannel_0_right_in[i];
-//
-//
+
+
        float control = anc.process(ref, error_mic);
-	   audiochannel_0_left_out[i] = ref;
-//
-//       if (anc_off) {
-//           audiochannel_0_left_out[i] = 0.0f;
-//       }
-//       else {
-//           audiochannel_0_left_out[i] = control;
-//       }
-//
+//	   audiochannel_0_left_out[i] = ref;
+
+       if (anc_off) {
+           audiochannel_0_left_out[i] = 0.0f;
+       }
+       else {
+           audiochannel_0_left_out[i] = control;
+       }
+
       audiochannel_0_right_out[i] = 0.0f;
+
+//      if (light) {
+//    	  gpio_write(GPIO_SHARC_SAM_LED12, GPIO_HIGH);
+//      } else {
+//    	  gpio_write(GPIO_SHARC_SAM_LED12, GPIO_LOW);
+//      }
    }
 
 
@@ -362,5 +368,5 @@ void processaudio_background_loop(void) {
  */
 void processaudio_mips_overflow(void)
 {
-    gpio_write(GPIO_SHARC_SAM_LED10, GPIO_HIGH);
+//    gpio_write(GPIO_SHARC_SAM_LED12, GPIO_HIGH);
 }

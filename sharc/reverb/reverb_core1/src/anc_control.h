@@ -8,3 +8,6 @@ extern volatile float anc_update_sign;
 extern volatile int   anc_lag;
 extern volatile bool  anc_adapt;
 extern volatile bool  anc_off;
+extern volatile float anc_ref_threshold;
+extern volatile float anc_mavg_weight;
+//extern volatile bool light;
