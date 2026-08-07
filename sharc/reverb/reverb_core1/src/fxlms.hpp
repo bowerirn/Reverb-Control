@@ -1,7 +1,6 @@
 #pragma once
 
 #include <stddef.h>
-#include "anc_params.h"
 #include "math.h"
 
 
@@ -45,8 +44,30 @@ template<int M, int IR_LENGTH, bool NLMS>
 class FxLMS {
     
     public:
+        float mu;
+        float eps;
+        float leak;
+        float cancel_gain;
+        float update_sign;
+        int lag;
+        bool adapt;
+        float ref_threshold;
+        float mavg_weight;
+
         FxLMS(const float* secondary_ir)
-            : ir(secondary_ir),
+            //public
+            : mu(1.25e-4f),
+              eps(1.0e-6f),
+              leak(3.0e-7f),
+              cancel_gain(0.02f),
+              update_sign(1.0f),
+              lag(94),
+              adapt(false),
+              ref_threshold(3.0e-4f),
+              mavg_weight(0.999896f),
+
+            //private
+              ir(secondary_ir),
               x_head(0),
               ir_head(0),
               xnorm(0.0f),
@@ -89,16 +110,6 @@ class FxLMS {
 
 
         float process(float ref, float error_mic) {
-        	const float mu = anc_mu;
-        	const float eps = anc_eps;
-        	const float leak = anc_leak;
-        	const float cancel_gain = anc_cancel_gain;
-        	const float update_sign = anc_update_sign;
-        	const int lag = anc_lag;
-        	const bool adapt = anc_adapt;
-            const float mavg_weight = anc_mavg_weight;
-            const float ref_threshold = anc_ref_threshold;
-
 
             float control = -cancel_gain * duplicated_ring_FIR<M>(ref, w, x, &x_head);
 

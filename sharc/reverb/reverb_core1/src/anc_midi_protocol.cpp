@@ -5,7 +5,6 @@
 #include <stdint.h>
 
 #include "anc_control.h"
-#include "anc_params.h"
 #include "callback_midi_message.h"
 #include "common/audio_system_config.h"
 
@@ -133,7 +132,9 @@ static int16_t encode_weight_q15(float weight) {
     if (weight > 1.0f)  weight = 1.0f;
     if (weight < -1.0f) weight = -1.0f;
 
-    return (int16_t)std::lround(weight * 32767.0f);
+    const float scaled = weight * 32767.0f;
+
+    return (int16_t)(scaled >= 0.0f ? scaled + 0.5f : scaled - 0.5f);
 }
 
 
@@ -245,42 +246,42 @@ void process_midi_control_change(uint8_t channel, uint8_t controller, uint8_t va
     
     switch (channel) {
         case MIDI_ANC_MU:
-            anc_mu = decode_small_float(controller, value);
+            anc.mu = decode_small_float(controller, value);
             break;
 
         case MIDI_ANC_EPS:
-            anc_eps = decode_small_float(controller, value);
+            anc.eps = decode_small_float(controller, value);
             break;
 
         case MIDI_ANC_LEAK:
-            anc_leak = decode_small_float(controller, value);
+            anc.leak = decode_small_float(controller, value);
             break;
 
         case MIDI_ANC_CANCEL_GAIN:
-            anc_cancel_gain = decode_small_float(controller, value);
+            anc.cancel_gain = decode_small_float(controller, value);
             break;
 
         case MIDI_ANC_REF_THRESHOLD:
-            anc_ref_threshold = decode_small_float(controller, value);
+            anc.ref_threshold = decode_small_float(controller, value);
             break;
 
         case MIDI_ANC_MAVG_TAU_MS: 
         {
             const uint16_t tau_ms = decode_midi_u14(controller, value);
-            anc_mavg_weight = weight_from_tau_ms(tau_ms);
+            anc.mavg_weight = weight_from_tau_ms(tau_ms);
             break;
         }
 
         case MIDI_ANC_UPDATE_SIGN:
-            anc_update_sign = (value == 0u) ? -1.0f : 1.0f;
+            anc.update_sign = (value == 0u) ? -1.0f : 1.0f;
             break;
 
         case MIDI_ANC_LAG:
-            anc_lag = (int)decode_midi_u14(controller, value);
+            anc.lag = (int)decode_midi_u14(controller, value);
             break;
 
         case MIDI_ANC_ADAPT:
-            anc_adapt = (value != 0u);
+            anc.adapt = (value != 0u);
             break;
 
         case MIDI_ANC_OFF:
@@ -312,18 +313,18 @@ void anc_midi_background_loop() {
     if (anc_transfer_requested) {
         anc_transfer_requested = false;
         anc_off = true;
-        anc_adapt = false;
+        anc.adapt = false;
         transfer_weights();
         anc_off = false;
-        anc_adapt = true;
+        anc.adapt = true;
     }
 
     if (anc_reset_requested) {
         anc_reset_requested = false;
         anc_off = true;
-        anc_adapt = false;
+        anc.adapt = false;
         anc.reset();
         anc_off = false;
-        anc_adapt = true;
+        anc.adapt = true;
     }
 }
