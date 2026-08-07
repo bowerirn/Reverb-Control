@@ -2,18 +2,58 @@ import matplotlib.pyplot as plt
 from src.measure_ir import *
 from pathlib import Path
 import numpy as np
-
+from src.audio_device import AudioDevice
+from src.midi_protocol import MidiProtocol
 
 class Sharc:
     def __init__(self, source, ad: AudioDevice):
         self.ad = ad
         self.source = source
         self.no_cancels = {}
-
+        self.midi_protocol = MidiProtocol()
 
         self.n_repeats = 1
         self.error_mic = []
+        self.w_norm_log = []
 
+
+    def set_mu(self, mu: float):
+        self.midi_protocol.set_mu(mu)
+
+    def set_leak(self, leak: float):
+        self.midi_protocol.set_leak(leak)
+
+    def set_eps(self, eps: float):
+        self.midi_protocol.set_eps(eps)
+
+    def set_cancel_gain(self, gain: float):
+        self.midi_protocol.set_cancel_gain(gain)
+
+    def set_ref_threshold(self, threshold: float):
+        self.midi_protocol.set_ref_threshold(threshold)
+
+    def set_mavg_tau_ms(self, tau_ms: int):
+        self.midi_protocol.set_mavg_tau_ms(tau_ms)
+
+    def set_lag(self, lag: int):
+        self.midi_protocol.set_lag(lag)
+
+    def set_update_sign(self, sign: int) -> None:
+        self.midi_protocol.set_update_sign(sign)
+
+    def set_adapt(self, adapt: bool) -> None:
+        self.midi_protocol.set_adapt(adapt)
+
+    def set_off(self, off: bool) -> None:   
+        self.midi_protocol.set_off(off)
+
+    def reset(self) -> None:
+        self.midi_protocol.request_reset()
+        self.w_norm_log = []
+        self.error_log = []
+
+    def weights(self) -> np.ndarray:
+        return self.midi_protocol.request_weights()
 
 
     def prep_ir(self, ir_len=128, panel_to_err_cm=7):
@@ -25,9 +65,18 @@ class Sharc:
 
 
     def cancel(self, n_repeats):
-        source = np.tile(self.source, n_repeats)
 
-        self.error_log, self.ref_log = self.ad.play(left=source)
+        self.set_adapt(True)
+
+        for _ in range(n_repeats):
+            self.error_log, self.ref_log = self.ad.play(left=self.source)
+
+            self.w_norm_log.append(
+                np.linalg.norm(self.midi_protocol.request_weights())
+            )
+
+        self.set_adapt(False)
+
         self.n_repeats = n_repeats
 
         if n_repeats in self.no_cancels:
@@ -50,7 +99,13 @@ class Sharc:
 
     def no_cancel(self, n_repeats):
         source = np.tile(self.source, n_repeats)
+
+        self.set_adapt(False)
+        self.set_off(True)
         error_mic, self.ref_log = self.ad.play(left=source)
+        self.set_off(False)
+        self.set_adapt(True)
+        
         self.no_cancels[n_repeats] = error_mic
 
     
@@ -210,4 +265,4 @@ class Sharc:
         if nc is not None:
             self.plot_error_reduction()
             self.plot_cumulative_error_reduction()
-        # self.plot_w_norm(title_ext)
+        self.plot_w_norm(title_ext)

@@ -200,8 +200,12 @@
  */
 void processaudio_setup(void)
 {
-    gpio_setup(GPIO_SHARC_SAM_LED10, GPIO_OUTPUT);
-    gpio_write(GPIO_SHARC_SAM_LED10, GPIO_LOW);
+	gpio_setup(GPIO_SHARC_SAM_LED10, GPIO_OUTPUT);
+	gpio_setup(GPIO_SHARC_SAM_LED11, GPIO_OUTPUT);
+	gpio_setup(GPIO_SHARC_SAM_LED12, GPIO_OUTPUT);
+//    gpio_write(GPIO_SHARC_SAM_LED10, GPIO_LOW);
+//	gpio_write(GPIO_SHARC_SAM_LED11, GPIO_LOW);
+	// gpio_write(GPIO_SHARC_SAM_LED12, GPIO_HIGH);
 }
 
 /*
@@ -226,10 +230,6 @@ void processaudio_setup(void)
 
 
 
-const int FILTER_ORDER = 512;
-const bool NLMS = true;
-
-static FxLMS<FILTER_ORDER, IR_LEN, AUDIO_BLOCK_SIZE, NLMS> anc(panel_ir);
 
 
 // When debugging audio algorithms, helpful to comment out this pragma for more linear single stepping.
@@ -359,7 +359,6 @@ void processaudio_background_loop(void) {
 	// *******************************************************************************
 	// Add any custom background processing here
 	// *******************************************************************************
-
 }
 
 /*

@@ -34,7 +34,7 @@
 // And our call backs from processing audio blocks and MIDI messages
 #include "callback_audio_processing.h"
 #include "callback_midi_message.h"
-
+#include "anc_midi_protocol.h"
 /**
  * If you want to use command program arguments, then place them in the following string.
  */
@@ -136,6 +136,7 @@ int main(void){
     while (1) {
 
         // Call our optional background audio processing loop
+        anc_midi_background_loop();
         processaudio_background_loop();
     }
 }

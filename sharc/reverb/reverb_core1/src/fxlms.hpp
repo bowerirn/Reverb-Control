@@ -1,8 +1,8 @@
 #pragma once
 
 #include <stddef.h>
-#include "anc_control.h"
-
+#include "anc_params.h"
+#include "math.h"
 
 
 template<int N>
@@ -41,7 +41,7 @@ inline float duplicated_ring_FIR(
 
 
 
-template<int M, int IR_LEN, int BLOCK_SIZE, bool NLMS>
+template<int M, int IR_LENGTH, bool NLMS>
 class FxLMS {
     
     public:
@@ -51,28 +51,31 @@ class FxLMS {
               ir_head(0),
               xnorm(0.0f),
               mavg(0.0f),
+              busy(false),
               update(false)
         {   
             reset();
         }
 
         void reset() {
+            while (busy);
+
             x_head = 0;
             ir_head = 0;
             xnorm = 0.0f;
             mavg = 0.0f;
             update = false;
 
-            for (int i = 0; i < M; ++i) {
+            for (int i = 0; i < M; i++) {
                 w[i] = 0.0f;
             }
 
-            for (int i = 0; i < 2 * M; ++i) {
+            for (int i = 0; i < 2 * M; i++) {
                 x[i] = 0.0f;
                 xf[i] = 0.0f;
             }
 
-            for (int i = 0; i < 2 * IR_LEN; ++i) {
+            for (int i = 0; i < 2 * IR_LENGTH; i++) {
                 z[i] = 0.0f;
             }
         }
@@ -99,10 +102,13 @@ class FxLMS {
 
             float control = -cancel_gain * duplicated_ring_FIR<M>(ref, w, x, &x_head);
 
-            if (!adapt || mu == 0.0f) return control;
+            if (!adapt || mu == 0.0f) {
+                busy = false;
+                return control;
+            }
 
 
-            float xf_sample = duplicated_ring_FIR<IR_LEN>(ref, ir, z, &ir_head);
+            float xf_sample = duplicated_ring_FIR<IR_LENGTH>(ref, ir, z, &ir_head);
 
             float old = xf[x_head];
             xnorm += xf_sample * xf_sample- old * old;
@@ -113,12 +119,10 @@ class FxLMS {
             mavg = mavg_weight * mavg + (1.0f - mavg_weight) * xnorm;
             
             if (mavg < ref_threshold) {
-//            	light = false;
+            	busy = false;
                 return control;
             }
             
-//            light = true;
-
 
             
             float step = mu;
@@ -144,9 +148,11 @@ class FxLMS {
 
             const float* xf_contiguous = xf + update_head;
 
+            busy = true;
             for (int k = 0; k < M; k++) {
                 w[k] = w[k] + update_scale * xf_contiguous[k];
             }
+            busy = false;
 
             return control;
         }
@@ -154,6 +160,7 @@ class FxLMS {
 
 
         const float* weights() {
+            while (busy); // This doesn't actually work you'd need a mutex but that's slow lol
             return w;
         }
 
@@ -166,8 +173,10 @@ class FxLMS {
 
         bool update;
 
+        bool busy;
+
         const float* ir;
-        float z[2 * IR_LEN];
+        float z[2 * IR_LENGTH];
 
         float block_decay;
 

@@ -24,6 +24,8 @@ bool midi_setup_sharc1(void);
 // MIDI callback for received event
 void midi_rx_callback_sharc1(void);
 
+bool midi_send_control_change(uint8_t channel, uint8_t controller, uint8_t value);
+
 #ifdef __cplusplus
 }
 #endif

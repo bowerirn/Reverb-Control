@@ -617,7 +617,7 @@ void audioframework_dma_handler(uint32_t iid, void *arg){
     static uint16_t tglCntr = 0;
     if (tglCntr++ > (AUDIO_SAMPLE_RATE / AUDIO_BLOCK_SIZE) / 2) {
         tglCntr = 0;
-        gpio_toggle(GPIO_SHARC_SAM_LED11);
+        // gpio_toggle(GPIO_SHARC_SAM_LED11);
         multicore_data->sharc_core1_led_strobed = true;
     }
 
