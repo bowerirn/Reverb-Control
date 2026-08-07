@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from typing import Tuple
 
 import mido
 import numpy as np
@@ -157,7 +158,7 @@ class MIDI_PROTOCOL:
 
 
 
-    def receive_weights(self, timeout_seconds=10.0) -> np.ndarray:
+    def receive_weights(self, timeout_seconds=10.0) -> tuple[np.ndarray, float]:
         expected_count = None
         weights = []
 
@@ -194,8 +195,12 @@ class MIDI_PROTOCOL:
                         f"received {len(weights)}."
                     )
 
+                encoded_rms = self._decode_q15_message(message)
+                true_rms = (encoded_rms + 1.0) / 2.0
+                true_norm = true_rms * np.sqrt(expected_count)
+
                 print(f"Weight transfer complete: received {len(weights)} values")
-                return np.asarray(weights, dtype=np.float32)
+                return np.asarray(weights, dtype=np.float32), true_norm
 
         raise TimeoutError(
             f"Timed out after {timeout_seconds:.1f} seconds. "

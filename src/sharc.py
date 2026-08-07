@@ -15,6 +15,7 @@ class Sharc:
         self.n_repeats = 1
         self.error_mic = []
         self.w_norm_log = []
+        self.true_norm_log = []
 
 
     def set_mu(self, mu: float):
@@ -56,7 +57,8 @@ class Sharc:
         self.error_log = []
 
     def weights(self) -> np.ndarray:
-        return self.midi_protocol.request_weights()
+        weights, true_norm = self.midi_protocol.request_weights()
+        return weights
 
 
     def prep_ir(self, ir_len=128, panel_to_err_cm=7):
@@ -74,9 +76,14 @@ class Sharc:
         for _ in range(n_repeats):
             self.error_log, self.ref_log = self.ad.play(left=self.source)
 
-            self.w_norm_log.append(
-                np.linalg.norm(self.midi_protocol.request_weights())
-            )
+            weights, true_norm = self.midi_protocol.request_weights()
+            norm = np.linalg.norm(weights)
+
+            self.w_norm_log.append(norm)
+            self.true_norm_log.append(true_norm)
+
+            if (abs(true_norm - norm) > 1e-4):
+                print(f"Warning: weight norm is {true_norm:.6f}, which may indicate instability.")
 
         self.set_adapt(False)
 

@@ -3,6 +3,7 @@
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "anc_control.h"
 #include "callback_midi_message.h"
@@ -198,18 +199,29 @@ static bool send_weight(float weight) {
  */
 static bool send_weight_start(uint16_t count) {
     const uint8_t channel = (uint8_t)(MIDI_TX_START << 2);
-
     const uint8_t high = (uint8_t)((count >> 7) & 0x7Fu);
-
     const uint8_t low = (uint8_t)(count & 0x7Fu);
 
     return midi_send_control_change(channel, high, low);
 }
 
 
-static bool send_weight_end() {
-    const uint8_t channel = (uint8_t)(MIDI_TX_END << 2);
-    return midi_send_control_change(channel, 0u, 0u);
+static bool send_weight_end(float rms) {
+    const int16_t quantized = encode_weight_q15((2 * rms) - 1.0f); //[-1, 1]
+
+    uint8_t channel = 0u;
+    uint8_t controller = 0u;
+    uint8_t value = 0u;
+
+    pack_q15_midi(
+        quantized,
+        MIDI_TX_END,
+        &channel,
+        &controller,
+        &value
+    );
+
+    return midi_send_control_change(channel, controller, value);
 }
 
 
@@ -226,11 +238,18 @@ static bool transfer_weights() {
     const float* w = anc.weights();
     while (!send_weight_start(FILTER_ORDER));
 
+    float norm = 0.0f;
+
     for (int i = 0; i < FILTER_ORDER; i++) {
         while (!send_weight(w[i]));
+        norm += w[i] * w[i];
     }
 
-    while (!send_weight_end());
+    norm = sqrtf(norm);
+
+    float rms = sqrtf(norm_sq / FILTER_ORDER);
+
+    while (!send_weight_end(rms));
 
     return true;
 }
