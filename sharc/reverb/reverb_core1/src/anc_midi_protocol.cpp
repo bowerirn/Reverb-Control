@@ -30,7 +30,8 @@ enum AncMidiChannel {
     MIDI_ANC_ADAPT         = 8,
     MIDI_ANC_OFF           = 9,
     MIDI_ANC_RESET         = 10,
-    MIDI_ANC_GET_WEIGHTS   = 11
+    MIDI_ANC_GET_WEIGHTS   = 11,
+    MIDI_SEED_DELTA        = 12
 };
 
 
@@ -129,16 +130,10 @@ static float weight_from_tau_ms(uint16_t tau_ms) {
  * Convert a weight in [-1, 1] to signed Q15.
  */
 static int16_t encode_weight_q15(float weight) {
-    if (weight >= 1.0f) {
-        return INT16_MAX;
-    }
+    if (weight > 1.0f)  weight = 1.0f;
+    if (weight < -1.0f) weight = -1.0f;
 
-    if (weight <= -1.0f) {
-        return INT16_MIN;
-    }
-
-    const float scaled = weight * 32768.0f;
-    return (int16_t)(scaled >= 0.0f ? scaled + 0.5f : scaled - 0.5f);
+    return (int16_t)std::lround(weight * 32767.0f);
 }
 
 
@@ -298,6 +293,10 @@ void process_midi_control_change(uint8_t channel, uint8_t controller, uint8_t va
 
         case MIDI_ANC_GET_WEIGHTS:
             anc_transfer_requested = true;
+            break;
+
+        case MIDI_SEED_DELTA:
+            anc.seed_delta((int)decode_midi_u14(controller, value), 1.0f);
             break;
 
         default:

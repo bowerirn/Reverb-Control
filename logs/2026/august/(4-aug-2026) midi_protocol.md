@@ -34,7 +34,7 @@ This is easy, the value is just 0 or 1
 * I treat the update sign as a boolean, and 0 just maps to -1 while 1 maps to 1
 
 ### Encoding positive integers
-Generally none of the integers I use are big enough to use 16 bits, we just chech that it's less than 16383.
+Generally none of the integers I use are big enough to use 16 bits, we just check that it's less than 16383.
 Then we split it into the high 7 bits and the low 7 bits.
 The controller carries the high bits, the value carries the low bits.
 In decoding, we just concatenate them and cast to an unsigned 16 bit int.
@@ -57,12 +57,13 @@ In general, none of the weights should be > 1.
 The norm of w should be <= 1, and in practice even when we seeded deltas they would drop lower than 1.
 Knowing this, I just used a fixed point quantization.
 Since the message only needs 2 channel bits, I used the additional 2 to get 16 total bits.
-1 bit for the sign, 15 bits to quantize.
+So we put it in a 16 bit signed int.
 Basically we just do round(w * 32767) to encode, and divide by 32767 to decode.
-This is technically not pure q15 because signd ints go from 32767 to -32768.
+This is technically not pure q15 because signed ints go from 32767 to -32768.
 If we used 32768 though then +1 wouldn't be a true value.
+So instead we just use a symmetric range [-32767, 32767]
 
-channel:    [message type: 2][sign: 1][Q15 bit 14: 1]
+channel:    [message type: 2][Q15 bits 15-14: 2]
 controller: [Q15 bits 13-7]
 value:      [Q15 bits 6-0]
 

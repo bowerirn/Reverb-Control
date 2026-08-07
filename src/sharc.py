@@ -47,6 +47,9 @@ class Sharc:
     def set_off(self, off: bool) -> None:   
         self.midi_protocol.set_off(off)
 
+    def seed_delta(self, index: int):
+        self.midi_protocol.seed_delta(index)
+
     def reset(self) -> None:
         self.midi_protocol.request_reset()
         self.w_norm_log = []
@@ -104,7 +107,6 @@ class Sharc:
         self.set_off(True)
         error_mic, self.ref_log = self.ad.play(left=source)
         self.set_off(False)
-        self.set_adapt(True)
         
         self.no_cancels[n_repeats] = error_mic
 

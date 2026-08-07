@@ -36,6 +36,7 @@ class MIDI_PROTOCOL:
         self.MIDI_ANC_OFF = 9
         self.MIDI_ANC_RESET = 10
         self.MIDI_ANC_GET_WEIGHTS = 11
+        self.MIDI_SEED_DELTA = 12
 
 
         # ---------------------------------------------------------------------------
@@ -95,16 +96,11 @@ class MIDI_PROTOCOL:
             | (message.value & 0x7F)
         )
 
-        # Convert unsigned 16-bit representation to signed two's complement.
+        # Convert from two's complement
         if bits & 0x8000:
-            quantized = bits - 0x10000
-        else:
-            quantized = bits
+            bits -= 0x10000
 
-        if quantized == -32768:
-            return -1.0
-
-        return quantized / 32767.0
+        return bits / 32767.0
 
 
 
@@ -242,6 +238,10 @@ class MIDI_PROTOCOL:
         self._send_bool(channel=self.MIDI_ANC_OFF, value=off)
 
 
+
+    def seed_delta(self, index: int):
+        self.send_u14(channel=self.MIDI_SEED_DELTA, value=index)
+        
 
     def request_reset(self) -> None:
         self._send_control(
