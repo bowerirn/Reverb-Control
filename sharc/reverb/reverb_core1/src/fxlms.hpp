@@ -56,7 +56,7 @@ class FxLMS {
 
         FxLMS(const float* secondary_ir)
             //public
-            : mu(1.25e-4f),
+            : mu(1e-4f),
               eps(1.0e-6f),
               leak(3.0e-7f),
               cancel_gain(0.02f),

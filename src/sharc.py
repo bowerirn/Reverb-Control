@@ -4,6 +4,8 @@ from pathlib import Path
 import numpy as np
 from src.audio_device import AudioDevice
 from src.midi_protocol import MidiProtocol
+from itertools import product
+
 
 class Sharc:
     def __init__(self, source, ad: AudioDevice):
@@ -18,29 +20,48 @@ class Sharc:
         self.true_norm_log = []
 
 
+        self.set_mu(1e-4)
+        self.set_leak(1e-7)
+        self.set_eps(1e-6)
+        self.set_cancel_gain(0.02)
+        self.set_ref_threshold(3.0e-4)
+        self.set_mavg_tau_ms(100)
+        self.set_lag(94)
+        self.set_update_sign(1) 
+
+
+
     def set_mu(self, mu: float):
         self.midi_protocol.set_mu(mu)
+        self.mu = mu
 
     def set_leak(self, leak: float):
         self.midi_protocol.set_leak(leak)
+        self.leak = leak
 
     def set_eps(self, eps: float):
         self.midi_protocol.set_eps(eps)
+        self.eps = eps
 
     def set_cancel_gain(self, gain: float):
         self.midi_protocol.set_cancel_gain(gain)
+        self.cancel_gain = gain
 
     def set_ref_threshold(self, threshold: float):
         self.midi_protocol.set_ref_threshold(threshold)
+        self.ref_threshold = threshold
 
     def set_mavg_tau_ms(self, tau_ms: int):
         self.midi_protocol.set_mavg_tau_ms(tau_ms)
+        self.mavg_tau_ms = tau_ms
 
     def set_lag(self, lag: int):
         self.midi_protocol.set_lag(lag)
+        self.lag = lag
 
     def set_update_sign(self, sign: int) -> None:
         self.midi_protocol.set_update_sign(sign)
+        self.update_sign = sign
 
     def set_adapt(self, adapt: bool) -> None:
         self.midi_protocol.set_adapt(adapt)
@@ -103,8 +124,59 @@ class Sharc:
             )
 
             print(f"Overall ANC / No ANC: {db:.2f} dB")
+
+            return db
         else:
             print(f"No baseline recording found for n_repeats={n_repeats}.")
+
+
+    def grid_search(self, n_repeats, param_dict):
+        setters = {
+            "mu": self.set_mu,
+            "leak": self.set_leak,
+            "eps": self.set_eps,
+            "cancel_gain": self.set_cancel_gain,
+            "ref_threshold": self.set_ref_threshold,
+            "mavg_tau_ms": self.set_mavg_tau_ms,
+            "lag": self.set_lag,
+            "update_sign": self.set_update_sign,
+        }
+
+        # Scalars become one-element lists.
+        search_values = {
+            key: value if isinstance(value, (list, tuple, np.ndarray)) else [value]
+            for key, value in param_dict.items()
+        }
+
+        keys = list(search_values.keys())
+
+        best_params = None
+        best_db = np.inf
+
+        for combination in product(*(search_values[key] for key in keys)):
+            params = dict(zip(keys, combination))
+
+            # Only set parameters explicitly supplied to grid_search().
+            for key, value in params.items():
+                setters[key](value)
+
+            self.reset()
+            print(f"Params: {params}")
+            db = self.cancel(n_repeats)
+            print()
+
+            assert db is not None, f"No baseline available for n_repeats={n_repeats}"
+
+            if db < best_db:
+                best_db = db
+                best_params = params.copy()
+
+        print(
+            f"Best Params: {best_params}, "
+            f"Best ANC / No ANC: {best_db:.2f} dB"
+        )
+
+        return best_params, best_db
 
 
     def no_cancel(self, n_repeats):
