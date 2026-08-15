@@ -288,8 +288,35 @@ class MidiProtocol:
 
 
 
-    def seed_delta(self, index: int):
-        self.send_u14(channel=self.MIDI_SEED_DELTA, value=index)
+    def seed_delta(self, index: int, amplitude: float = 1.0):
+        assert 0 <= index <= 2047
+        assert amplitude in (-1.0, -0.75, -0.5, -0.25, 0.25, 0.5, 0.75, 1.0)
+
+        sign = 1 if amplitude < 0 else 0
+
+        amp_code = {
+            0.25: 0,
+            0.50: 1,
+            0.75: 2,
+            1.00: 3,
+        }[abs(amplitude)]
+
+        payload = ( (sign << 13)  |  (amp_code << 11)  |  index )
+
+        controller = (payload >> 7) & 0x7F
+        value = payload & 0x7F
+
+        self._send_control(
+            channel=self.MIDI_SEED_DELTA,
+            controller=controller,
+            value=value,
+        )
+
+
+
+
+
+
         
 
     def request_reset(self) -> None:

@@ -113,8 +113,8 @@ class Sharc:
     def set_off(self, off: bool) -> None:   
         self.midi_protocol.set_off(off)
 
-    def seed_delta(self, index: int):
-        self.midi_protocol.seed_delta(index)
+    def seed_delta(self, index: int, amplitude: float = 1.0):
+        self.midi_protocol.seed_delta(index, amplitude)
 
     def reset(self) -> None:
         self.midi_protocol.request_reset()

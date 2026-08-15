@@ -126,6 +126,43 @@ static float weight_from_tau_ms(uint16_t tau_ms) {
 }
 
 
+
+
+
+
+static void decode_seed_delta(
+    uint8_t controller,
+    uint8_t value,
+    int* index,
+    float* amplitude
+) {
+    const uint16_t payload =
+        ((uint16_t)(controller & 0x7Fu) << 7)
+        | (uint16_t)(value & 0x7Fu);
+
+    const uint8_t sign = (uint8_t)((payload >> 13) & 0x01u);
+    const uint8_t amp_code = (uint8_t)((payload >> 11) & 0x03u);
+
+    *index = (int)(payload & 0x07FFu);
+
+    static const float amplitudes[4] = {0.25f, 0.50f, 0.75f, 1.00};
+
+    float amp = amplitudes[amp_code];
+
+    if (sign) {
+        amp = -amp;
+    }
+
+    *amplitude = amp;
+}
+
+
+
+
+
+
+
+
 /*
  * Convert a weight in [-1, 1] to signed Q15.
  */
@@ -165,6 +202,11 @@ static void pack_q15_midi(
 
     *value = (uint8_t)(bits & 0x7Fu);
 }
+
+
+
+
+
 
 
 /*
@@ -314,8 +356,15 @@ void process_midi_control_change(uint8_t channel, uint8_t controller, uint8_t va
             break;
 
         case MIDI_SEED_DELTA:
-            anc.seed_delta((int)decode_midi_u14(controller, value), 1.0f);
+        {
+            int index;
+            float amplitude;
+
+            decode_seed_delta(controller, value, &index, &amplitude);
+
+            anc.seed_delta(index, amplitude);
             break;
+        }
 
         default:
             break;
