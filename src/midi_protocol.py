@@ -8,19 +8,31 @@ import numpy as np
 import math
 
 
-class MIDI_PROTOCOL:
+class MidiProtocol:
     def __init__(self, input_name=None, output_name=None):
         self.output_name = output_name or "USB2.0-MIDI 1"
         self.input_name = input_name or "USB2.0-MIDI 0"
         print(f"\nUsing output: {self.output_name}")
         print(f"Using input:  {self.input_name}")
 
-        self.midi_in = mido.open_input(self.input_name)
-        self.midi_out = mido.open_output(self.output_name)
+        try:
+            self.midi_in = mido.open_input(self.input_name)
+            self.midi_out = mido.open_output(self.output_name)
 
-        while self.midi_in.poll() is not None:
-            pass
+            self.connected = True
 
+            while self.midi_in.poll() is not None:
+                pass
+            
+        except Exception as e:
+            print('Warning: Could not open MIDI ports. Make sure the SHARC is connected and the correct ports are specified.')
+            self.connected = False
+
+
+        
+
+
+        
 
         # ---------------------------------------------------------------------------
         # Incoming command channels: Python -> SHARC
@@ -52,6 +64,11 @@ class MIDI_PROTOCOL:
         self.MIDI_TX_START = 1
         self.MIDI_TX_END = 2
         self.MIDI_TX_STATUS = 3
+
+
+    def close(self):
+        self.midi_in.close()
+        self.midi_out.close()
 
 
 
@@ -108,12 +125,13 @@ class MIDI_PROTOCOL:
 
 
     def _send_control(self, channel, controller=0, value=0):
+        
         """Send one Control Change message."""
         assert 0 <= channel <= 15, "MIDI channel must be between 0 and 15."
         assert 0 <= controller <= 127, "Controller must be between 0 and 127."
         assert 0 <= value <= 127, "Value must be between 0 and 127."
 
-        self.output.send(
+        self.midi_out.send(
             mido.Message(
                 "control_change",
                 channel=channel,
@@ -128,9 +146,7 @@ class MIDI_PROTOCOL:
 
     def send_small_float(self, channel, value: float):
         controller, midi_value = self._encode_small_float(value)
-
         self._send_control(
-            self.midi_out,
             channel=channel,
             controller=controller,
             value=midi_value,
@@ -140,15 +156,13 @@ class MIDI_PROTOCOL:
         high, low = self._encode_u14(value)
 
         self._send_control(
-            self.midi_out,
             channel=channel,
             controller=high,
             value=low,
         )
 
-    def send_boolean(self, channel, value: bool):
+    def send_bool(self, channel, value: bool):
         self._send_control(
-            self.midi_out,
             channel=channel,
             controller=0,
             value=int(value),
@@ -165,7 +179,7 @@ class MIDI_PROTOCOL:
         deadline = time.monotonic() + timeout_seconds
 
         while time.monotonic() < deadline:
-            message = self.input_port.poll()
+            message = self.midi_in.poll()
 
             if message is None:
                 time.sleep(0.001)
@@ -234,13 +248,13 @@ class MIDI_PROTOCOL:
     
     def set_update_sign(self, sign: int) -> None:
         assert sign in (-1, 1), "Update sign must be -1 or +1."
-        self._send_bool(channel=self.MIDI_ANC_UPDATE_SIGN, value=(sign == 1))
+        self.send_bool(channel=self.MIDI_ANC_UPDATE_SIGN, value=(sign == 1))
 
     def set_adapt(self, adapt: bool) -> None:
-        self._send_bool(channel=self.MIDI_ANC_ADAPT, value=adapt)
+        self.send_bool(channel=self.MIDI_ANC_ADAPT, value=adapt)
 
     def set_off(self, off: bool) -> None:
-        self._send_bool(channel=self.MIDI_ANC_OFF, value=off)
+        self.send_bool(channel=self.MIDI_ANC_OFF, value=off)
 
 
 

@@ -248,6 +248,13 @@ void processaudio_callback(void) {
            audiochannel_0_left_out[i] = 0.0f;
        }
        else {
+    	   if (control > 0.2f) {
+    		   control = 0.2f;
+    		   gpio_write(GPIO_SHARC_SAM_LED11, GPIO_HIGH);
+    	   } else if (control < -0.2f) {
+    		   control = -0.2f;
+    		   gpio_write(GPIO_SHARC_SAM_LED11, GPIO_HIGH);
+    	   }
            audiochannel_0_left_out[i] = control;
        }
 

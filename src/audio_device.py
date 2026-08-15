@@ -20,7 +20,7 @@ def get_device(name_contains="focusrite"):
     raise RuntimeError(f"{name_contains} device not found")
 
 class AudioDevice:
-    def __init__(self, fs=48_000, in_device=None, out_device=None):
+    def __init__(self, fs=96_000, in_device=None, out_device=None):
 
         self.system_delay_ms = 89.83333327341825
 

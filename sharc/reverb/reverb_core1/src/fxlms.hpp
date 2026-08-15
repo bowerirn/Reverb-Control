@@ -37,6 +37,42 @@ inline float duplicated_ring_FIR(
 }
 
 
+template<int N>
+inline float duplicated_ring_dot(
+    const float* coeffs,
+    const float* state,
+    int head
+) {
+    const float* contiguous_state = state + head;
+
+    float y = 0.0f;
+
+    for (int k = 0; k < N; k++) {
+        y += coeffs[k] * contiguous_state[k];
+    }
+
+    return y;
+}
+
+
+template<int N>
+inline void duplicated_ring_push(
+    float new_sample,
+    float* state,
+    int* head
+) {
+    int h = *head - 1;
+
+    if (h < 0) {
+        h = N - 1;
+    }
+
+    *head = h;
+
+    state[h] = new_sample;
+    state[h + N] = new_sample;
+}
+
 
 
 
@@ -53,23 +89,31 @@ class FxLMS {
         bool adapt;
         float ref_threshold;
         float mavg_weight;
+        float max_step;
+        float min_xnorm;
+        float max_control;
 
-        FxLMS(const float* secondary_ir)
+        FxLMS(const float* error_ir, const float* ref_ir)
             //public
             : mu(1e-4f),
               eps(1.0e-6f),
               leak(3.0e-7f),
               cancel_gain(0.02f),
               update_sign(1.0f),
-              lag(94),
+              lag(78),
               adapt(false),
               ref_threshold(3.0e-4f),
               mavg_weight(0.999896f),
+              max_control(0.0f),
+              min_xnorm(1e30f),
+              max_step(0.0f),
 
             //private
-              ir(secondary_ir),
+              path_ir(error_ir),
+              feedback_ir(ref_ir),
               x_head(0),
-              ir_head(0),
+              path_ir_head(0),
+              feedback_ir_head(0),
               xnorm(0.0f),
               mavg(0.0f),
               busy(false),
@@ -82,10 +126,16 @@ class FxLMS {
             while (busy);
 
             x_head = 0;
-            ir_head = 0;
+            path_ir_head = 0;
+            feedback_ir_head = 0;
             xnorm = 0.0f;
             mavg = 0.0f;
             update = false;
+
+            
+            max_step = 0.0f;
+            min_xnorm = 1e30f;
+            max_control = 0.0f;
 
             for (int i = 0; i < M; i++) {
                 w[i] = 0.0f;
@@ -97,7 +147,11 @@ class FxLMS {
             }
 
             for (int i = 0; i < 2 * IR_LENGTH; i++) {
-                z[i] = 0.0f;
+                z_path[i] = 0.0f;
+            }
+
+            for (int i = 0; i < 2 * IR_LENGTH; i++) {
+                z_feedback[i] = 0.0f;
             }
         }
 
@@ -110,8 +164,13 @@ class FxLMS {
 
 
         float process(float ref, float error_mic) {
+            float predicted_feedback = duplicated_ring_dot<IR_LENGTH>(feedback_ir, z_feedback, feedback_ir_head);
+            float cleaned_ref = ref - predicted_feedback;
+            
+            float control = -cancel_gain * duplicated_ring_FIR<M>(cleaned_ref, w, x, &x_head);
 
-            float control = -cancel_gain * duplicated_ring_FIR<M>(ref, w, x, &x_head);
+            duplicated_ring_push<IR_LENGTH>(control, z_feedback, &feedback_ir_head);
+
 
             if (!adapt || mu == 0.0f) {
                 busy = false;
@@ -119,10 +178,14 @@ class FxLMS {
             }
 
 
-            float xf_sample = duplicated_ring_FIR<IR_LENGTH>(ref, ir, z, &ir_head);
+            float xf_sample = duplicated_ring_FIR<IR_LENGTH>(cleaned_ref, path_ir, z_path, &path_ir_head);
 
             float old = xf[x_head];
             xnorm += xf_sample * xf_sample- old * old;
+
+            if (xnorm < 0.0f) {
+                xnorm = 0.0f;
+            }
             
             xf[x_head] = xf_sample;
             xf[x_head + M] = xf_sample;
@@ -133,6 +196,8 @@ class FxLMS {
             	busy = false;
                 return control;
             }
+
+
             
 
             
@@ -159,9 +224,25 @@ class FxLMS {
 
             const float* xf_contiguous = xf + update_head;
 
+
+            if (xnorm < min_xnorm) {
+                min_xnorm = xnorm;
+            }
+
+            if (step > max_step) {
+                max_step = step;
+            }
+
+            float abs_control = fabsf(control);
+
+            if (abs_control > max_control) {
+                max_control = abs_control;
+            }
+
+
             busy = true;
             for (int k = 0; k < M; k++) {
-                w[k] = w[k] + update_scale * xf_contiguous[k];
+                w[k] = decay * w[k] + update_scale * xf_contiguous[k];
             }
             busy = false;
 
@@ -186,13 +267,17 @@ class FxLMS {
 
         bool busy;
 
-        const float* ir;
-        float z[2 * IR_LENGTH];
+        const float* path_ir;
+        const float* feedback_ir;
+        float z_path[2 * IR_LENGTH];
+        float z_feedback[2 * IR_LENGTH];
 
         float block_decay;
 
         int x_head;
-        int ir_head;
+        int path_ir_head;
+        int feedback_ir_head;
+
 
         float xnorm;
         float mavg;

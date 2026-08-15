@@ -238,14 +238,12 @@ static bool transfer_weights() {
     const float* w = anc.weights();
     while (!send_weight_start(FILTER_ORDER));
 
-    float norm = 0.0f;
+    float norm_sq = 0.0f;
 
     for (int i = 0; i < FILTER_ORDER; i++) {
         while (!send_weight(w[i]));
-        norm += w[i] * w[i];
+        norm_sq += w[i] * w[i];
     }
-
-    norm = sqrtf(norm);
 
     float rms = sqrtf(norm_sq / FILTER_ORDER);
 

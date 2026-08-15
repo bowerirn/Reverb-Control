@@ -3,7 +3,7 @@
 #include "panel_ir.h"
 #include "fxlms.hpp"
 
-#define FILTER_ORDER 512
+#define FILTER_ORDER 1024
 #define NLMS true
 
 extern volatile bool anc_off;

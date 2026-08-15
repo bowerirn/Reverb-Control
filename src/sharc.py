@@ -8,28 +8,33 @@ from itertools import product
 
 
 class Sharc:
-    def __init__(self, source, ad: AudioDevice):
+    def __init__(self, source, ad: AudioDevice, midi_in=None, midi_out=None):
         self.ad = ad
         self.source = source
         self.no_cancels = {}
-        self.midi_protocol = MidiProtocol()
+        self.midi_protocol = MidiProtocol(midi_in, midi_out)
 
         self.n_repeats = 1
         self.error_mic = []
         self.w_norm_log = []
         self.true_norm_log = []
+        self.weights = np.array([])
 
+        self.ir_file = r"..\experiments\data\current_irs.npz"
+        self.panel_ir_h = r'..\sharc\reverb\reverb_core1\src'
 
-        self.set_mu(1e-4)
-        self.set_leak(1e-7)
-        self.set_eps(1e-6)
-        self.set_cancel_gain(0.02)
-        self.set_ref_threshold(3.0e-4)
-        self.set_mavg_tau_ms(100)
-        self.set_lag(94)
-        self.set_update_sign(1) 
+        if self.midi_protocol.connected:
+            self.set_mu(1e-4)
+            self.set_leak(1e-7)
+            self.set_eps(1e-6)
+            self.set_cancel_gain(0.02)
+            self.set_ref_threshold(3.0e-4)
+            self.set_mavg_tau_ms(100)
+            self.set_lag(86)
+            self.set_update_sign(1) 
 
-
+    def close(self):
+        self.midi_protocol.close()
 
     def set_mu(self, mu: float):
         self.midi_protocol.set_mu(mu)
@@ -77,34 +82,55 @@ class Sharc:
         self.w_norm_log = []
         self.error_log = []
 
-    def weights(self) -> np.ndarray:
+    def get_weights(self) -> np.ndarray:
         weights, true_norm = self.midi_protocol.request_weights()
+        self.weights = weights
         return weights
 
+    def save_irs(self):
+        error_ir, ref_ir = measure_ir(self.ad)
+        np.savez(self.ir_file, error_ir=error_ir, ref_ir=ref_ir)
 
-    def prep_ir(self, ir_len=128, panel_to_err_cm=7):
-        error_ir, _ = measure_ir(self.ad)
-        panel_ir = align_ir_by_distance(error_ir, panel_to_err_cm, ir_len)
-        plt.plot(panel_ir)
-        self.write_ir(panel_ir, r'..\sharc\reverb\reverb_core1\src')
+    def prep_irs(self, ir_len=256, panel_to_err_cm=4.5):
+
+        irs = np.load(self.ir_file)
+        error_ir = irs['error_ir']
+        ref_ir = irs['ref_ir']
+        
+        error_ir, ref_ir = align_irs_by_distance(
+            error_ir, ref_ir, 
+            distance_cm=panel_to_err_cm, 
+            ir_len=ir_len, 
+            fs=self.ad.fs
+        )
+
+        plt.plot(error_ir, label='panel_ir')
+        plt.plot(ref_ir, label='ref_ir')
+        plt.legend()
+
+        self.write_ir(error_ir, ref_ir, self.panel_ir_h)
 
 
 
-    def cancel(self, n_repeats):
+    def cancel(self, n_repeats, adapt=True):
+        self.set_off(False)
 
-        self.set_adapt(True)
+        self.set_adapt(adapt)
 
-        for _ in range(n_repeats):
-            self.error_log, self.ref_log = self.ad.play(left=self.source)
+        source = np.tile(self.source, n_repeats)
+        self.error_log, self.ref_log = self.ad.play(left=source)
+        # for _ in range(n_repeats):
+            # self.error_log, self.ref_log = self.ad.play(left=self.source)
 
-            weights, true_norm = self.midi_protocol.request_weights()
-            norm = np.linalg.norm(weights)
+            # weights, true_norm = self.midi_protocol.request_weights()
+            # self.weights = weights
+            # norm = np.linalg.norm(weights)
 
-            self.w_norm_log.append(norm)
-            self.true_norm_log.append(true_norm)
+            # self.w_norm_log.append(norm)
+            # self.true_norm_log.append(true_norm)
 
-            if (abs(true_norm - norm) > 1e-4):
-                print(f"Warning: weight norm is {true_norm:.6f}, which may indicate instability.")
+            # if (abs(true_norm - norm) > 1e-4):
+                # print(f"Warning: weight norm is {true_norm:.6f}, which may indicate instability.")
 
         self.set_adapt(False)
 
@@ -152,6 +178,7 @@ class Sharc:
 
         best_params = None
         best_db = np.inf
+        best_weights = None
 
         for combination in product(*(search_values[key] for key in keys)):
             params = dict(zip(keys, combination))
@@ -170,13 +197,14 @@ class Sharc:
             if db < best_db:
                 best_db = db
                 best_params = params.copy()
+                # best_weights = self.weights.copy()
 
         print(
             f"Best Params: {best_params}, "
             f"Best ANC / No ANC: {best_db:.2f} dB"
         )
 
-        return best_params, best_db
+        return best_params, best_db#, best_weights
 
 
     def no_cancel(self, n_repeats):
@@ -190,7 +218,7 @@ class Sharc:
         self.no_cancels[n_repeats] = error_mic
 
     
-    def write_ir(self, ir, path='.'):
+    def write_ir(self, error_ir, ref_ir, path='.'):
         path = Path(path)
 
         if path.is_dir() or path.suffix == "":
@@ -200,14 +228,32 @@ class Sharc:
 
         with path.open("w") as f:
             f.write("#pragma once\n\n")
-            f.write(f"#define IR_LEN {len(ir)}\n\n")
-            f.write("static const float panel_ir[IR_LEN] = {\n")
-            for v in ir:
+            f.write(f"#define IR_LEN {len(error_ir)}\n\n")
+
+            f.write("static const float error_ir[IR_LEN] = {\n")
+            for v in error_ir:
+                f.write(f"    {float(v):.9e}f,\n")
+            f.write("};\n\n")
+
+            f.write("static const float ref_ir[IR_LEN] = {\n")
+            for v in ref_ir:
                 f.write(f"    {float(v):.9e}f,\n")
             f.write("};\n")
 
 
 
+
+    def plot_weights(self, weights=None, title_ext=''):
+        if weights is None:
+            weights = self.weights
+
+        plt.figure(figsize=(10, 4))
+        plt.plot(weights)
+        plt.title(f"Adaptive Filter Weights {title_ext}")
+        plt.xlabel("Weight Index")
+        plt.ylabel("Weight Value")
+        plt.grid(True)
+        plt.show()
 
 
     def plot_error_mic(self, title_ext=''):

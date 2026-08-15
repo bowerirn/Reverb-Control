@@ -3,4 +3,4 @@
 
 volatile bool anc_off = true;
 
-FxLMS<FILTER_ORDER, IR_LEN, NLMS> anc(panel_ir);
+FxLMS<FILTER_ORDER, IR_LEN, NLMS> anc(error_ir, ref_ir);

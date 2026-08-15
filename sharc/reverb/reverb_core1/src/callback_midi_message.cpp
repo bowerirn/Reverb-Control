@@ -67,12 +67,12 @@ bool midi_send_control_change(
  */
 bool midi_setup_sharc1(void)
 {
-    // gpio_setup(GPIO_SHARC_SAM_LED10, GPIO_OUTPUT);
-	// gpio_setup(GPIO_SHARC_SAM_LED11, GPIO_OUTPUT);
-	// gpio_setup(GPIO_SHARC_SAM_LED12, GPIO_OUTPUT);
-    // gpio_write(GPIO_SHARC_SAM_LED10, GPIO_LOW);
-    // gpio_write(GPIO_SHARC_SAM_LED11, GPIO_LOW);
-	// gpio_write(GPIO_SHARC_SAM_LED12, GPIO_LOW);
+     gpio_setup(GPIO_SHARC_SAM_LED10, GPIO_OUTPUT);
+	 gpio_setup(GPIO_SHARC_SAM_LED11, GPIO_OUTPUT);
+	 gpio_setup(GPIO_SHARC_SAM_LED12, GPIO_OUTPUT);
+     gpio_write(GPIO_SHARC_SAM_LED10, GPIO_LOW);
+     gpio_write(GPIO_SHARC_SAM_LED11, GPIO_LOW);
+	 gpio_write(GPIO_SHARC_SAM_LED12, GPIO_LOW);
     
     if (uart_initialize(
         &midi_uart_sharc1,
@@ -140,6 +140,7 @@ void midi_rx_callback_sharc1(void) {
 
             data_count = 0;
 
+            gpio_write(GPIO_SHARC_SAM_LED12, GPIO_HIGH);
             process_midi_control_change(channel, controller, value);
         }
     }

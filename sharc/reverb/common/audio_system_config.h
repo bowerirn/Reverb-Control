@@ -65,7 +65,7 @@
  ******************************************************************************/
 
 // This should be a base 2 number from 8 to 128
-#define AUDIO_BLOCK_SIZE                              (4)
+#define AUDIO_BLOCK_SIZE                              (8)
 
 // Set audio sample rate
 #define AUDIO_SAMPLE_RATE                             (96000)

@@ -3,7 +3,7 @@ from scipy.signal import chirp, fftconvolve
 from .audio_device import AudioDevice
 
 
-def make_sweep(fs=48000, duration=6.0, f0=150, f1=22000, fade=0.02):
+def make_sweep(fs=96_000, duration=6.0, f0=150, f1=22_000, fade=0.02):
     t = np.arange(int(fs * duration)) / fs
 
     sweep = chirp(t, f0=f0, f1=f1, t1=duration, method='logarithmic').astype(np.float32)
@@ -20,7 +20,7 @@ def make_sweep(fs=48000, duration=6.0, f0=150, f1=22000, fade=0.02):
     return sweep
 
 
-def estimate_ir(recorded, sweep, fs=48000, f0=150, f1=22000):
+def estimate_ir(recorded, sweep, fs=96_000, f0=150, f1=22_000):
     duration = len(sweep) / fs
     t = np.arange(len(sweep)) / fs
     k = np.log(f1 / f0) / duration
@@ -38,7 +38,7 @@ def estimate_ir(recorded, sweep, fs=48000, f0=150, f1=22000):
 
 
 
-def measure_ir(ad: AudioDevice, duration=6.0, f0=150, f1=22000, player_channel=0, silence=4.0):
+def measure_ir(ad: AudioDevice, duration=6.0, f0=150, f1=22_000, player_channel=0, silence=4.0):
     if player_channel not in (0, 1):
         raise ValueError("player_channel must be 0 or 1")
 
@@ -65,7 +65,7 @@ def measure_ir_stream(
     ad: AudioDevice,
     duration=6.0,
     f0=150,
-    f1=22000,
+    f1=22_000,
     player_channel=0,
     silence=4.0,
     block_size=64,
@@ -97,12 +97,12 @@ def measure_ir_stream(
 
 
 
-def align_ir_by_distance(ir, distance_cm, ir_len=128, fs=48000):
+def align_irs_by_distance(primary_ir, *other_irs, distance_cm=4.5, ir_len=128, fs=96_000):
     sound_speed = 343.0
 
     acoustic_delay = int(round((distance_cm / 100.0) / sound_speed * fs))
 
-    peak = np.argmax(np.abs(ir))
+    peak = np.argmax(np.abs(primary_ir))
 
     start = peak - acoustic_delay
     if start < 0:
@@ -110,12 +110,17 @@ def align_ir_by_distance(ir, distance_cm, ir_len=128, fs=48000):
 
     end = start + ir_len
 
-    if end > len(ir):
-        out = np.zeros(ir_len, dtype=ir.dtype)
-        available = ir[start:]
-        out[:len(available)] = available
-        return out
+    
+    out = []
+    for ir in [primary_ir, *other_irs]:
+        if end > len(primary_ir):
+            temp = np.zeros(ir_len, dtype=primary_ir.dtype)
+            available = ir[start:]
+            temp[:len(available)] = available
+            out.append(temp)
+        else:
+            out.append(ir[start:end])
 
-    return ir[start:end]
+    return out
 
 
