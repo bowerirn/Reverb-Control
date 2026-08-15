@@ -23,15 +23,54 @@ class Sharc:
         self.ir_file = r"..\experiments\data\current_irs.npz"
         self.panel_ir_h = r'..\sharc\reverb\reverb_core1\src'
 
+        self.mu = None
+        self.leak = None
+        self.eps = None
+        self.cancel_gain = None
+        self.ref_threshold = None
+        self.mavg_tau_ms = None
+        self.lag = None
+        self.update_sign = None
+
         if self.midi_protocol.connected:
-            self.set_mu(1e-4)
-            self.set_leak(1e-7)
-            self.set_eps(1e-6)
-            self.set_cancel_gain(0.02)
-            self.set_ref_threshold(3.0e-4)
-            self.set_mavg_tau_ms(100)
-            self.set_lag(86)
-            self.set_update_sign(1) 
+            self.set(
+                mu=1e-3,
+                leak=3e-7,
+                eps=1e-6,
+                cancel_gain=0.1,
+                ref_threshold=3e-4,
+                mavg_tau_ms=100,
+                lag=86,
+                update_sign=1,
+            )
+
+    def set(
+        self,
+        mu=None,
+        leak=None,
+        eps=None,
+        cancel_gain=None,
+        ref_threshold=None,
+        mavg_tau_ms=None,
+        lag=None,
+        update_sign=None,
+    ):
+        if mu is not None and mu != self.mu:
+            self.set_mu(mu)
+        if leak is not None and leak != self.leak:
+            self.set_leak(leak)
+        if eps is not None and eps != self.eps:
+            self.set_eps(eps)
+        if cancel_gain is not None and cancel_gain != self.cancel_gain:
+            self.set_cancel_gain(cancel_gain)
+        if ref_threshold is not None and ref_threshold != self.ref_threshold:
+            self.set_ref_threshold(ref_threshold)
+        if mavg_tau_ms is not None and mavg_tau_ms != self.mavg_tau_ms:
+            self.set_mavg_tau_ms(mavg_tau_ms)
+        if lag is not None and lag != self.lag:
+            self.set_lag(lag)
+        if update_sign is not None and update_sign != self.update_sign:
+            self.set_update_sign(update_sign) 
 
     def close(self):
         self.midi_protocol.close()
@@ -112,9 +151,29 @@ class Sharc:
 
 
 
-    def cancel(self, n_repeats, adapt=True):
-        self.set_off(False)
+    def cancel(
+        self, n_repeats, adapt=True,
+        mu=None,
+        leak=None,
+        eps=None,
+        cancel_gain=None,
+        ref_threshold=None,
+        mavg_tau_ms=None,
+        lag=None,
+        update_sign=None,
+    ):
 
+        self.set(
+            mu=mu,
+            leak=leak,
+            eps=eps,
+            cancel_gain=cancel_gain,
+            ref_threshold=ref_threshold,
+            mavg_tau_ms=mavg_tau_ms,
+            lag=lag,
+            update_sign=update_sign,
+        )
+        self.set_off(False)
         self.set_adapt(adapt)
 
         source = np.tile(self.source, n_repeats)
@@ -157,17 +216,6 @@ class Sharc:
 
 
     def grid_search(self, n_repeats, param_dict):
-        setters = {
-            "mu": self.set_mu,
-            "leak": self.set_leak,
-            "eps": self.set_eps,
-            "cancel_gain": self.set_cancel_gain,
-            "ref_threshold": self.set_ref_threshold,
-            "mavg_tau_ms": self.set_mavg_tau_ms,
-            "lag": self.set_lag,
-            "update_sign": self.set_update_sign,
-        }
-
         # Scalars become one-element lists.
         search_values = {
             key: value if isinstance(value, (list, tuple, np.ndarray)) else [value]
@@ -184,8 +232,7 @@ class Sharc:
             params = dict(zip(keys, combination))
 
             # Only set parameters explicitly supplied to grid_search().
-            for key, value in params.items():
-                setters[key](value)
+            self.set(**params)
 
             self.reset()
             print(f"Params: {params}")

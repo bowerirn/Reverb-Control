@@ -10,8 +10,26 @@ import math
 
 class MidiProtocol:
     def __init__(self, input_name=None, output_name=None):
-        self.output_name = output_name or "USB2.0-MIDI 1"
-        self.input_name = input_name or "USB2.0-MIDI 0"
+
+        input_names = mido.get_input_names()
+        output_names = mido.get_output_names()
+
+        if input_name is None:
+            input_name = next(
+                name for name in input_names
+                if "USB2.0-MIDI" in name
+            )
+
+        if output_name is None:
+            output_name = next(
+                name for name in output_names
+                if "USB2.0-MIDI" in name
+                and "MIDIOUT2" not in name
+            )
+
+        self.input_name = input_name
+        self.output_name = output_name
+
         print(f"\nUsing output: {self.output_name}")
         print(f"Using input:  {self.input_name}")
 
@@ -23,9 +41,21 @@ class MidiProtocol:
 
             while self.midi_in.poll() is not None:
                 pass
-            
-        except Exception as e:
-            print('Warning: Could not open MIDI ports. Make sure the SHARC is connected and the correct ports are specified.')
+
+        except Exception:
+            print(
+                "Warning: Could not open MIDI ports. "
+                "Make sure the SHARC is connected and the correct ports are specified.\n"
+            )
+
+            print("MIDI outputs:")
+            for i, name in enumerate(output_names):
+                print(f"  {i}: {name}")
+
+            print("\nMIDI inputs:")
+            for i, name in enumerate(input_names):
+                print(f"  {i}: {name}")
+
             self.connected = False
 
 
