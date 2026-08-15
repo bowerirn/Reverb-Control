@@ -5,6 +5,8 @@ import numpy as np
 from src.audio_device import AudioDevice
 from src.midi_protocol import MidiProtocol
 from itertools import product
+import time
+import threading
 
 
 class Sharc:
@@ -126,6 +128,25 @@ class Sharc:
         self.weights = weights
         return weights
 
+
+    def _weight_logger(self, n_requests, interval_s=5.0):
+        for i in range(n_requests):
+            weights, true_norm = self.midi_protocol.request_weights(verbose=False)
+
+            norm = np.linalg.norm(weights)
+
+            self.w_norm_log.append(norm)
+            self.true_norm_log.append(true_norm)
+
+            if abs(true_norm - norm) > 1e-4:
+                print(
+                    f"Warning: weight norm mismatch: "
+                    f"{true_norm:.6f} vs {norm:.6f}"
+                )
+
+            if i < n_requests - 1:
+                time.sleep(interval_s)
+
     def save_irs(self):
         error_ir, ref_ir = measure_ir(self.ad)
         np.savez(self.ir_file, error_ir=error_ir, ref_ir=ref_ir)
@@ -152,7 +173,7 @@ class Sharc:
 
 
     def cancel(
-        self, n_repeats, adapt=True,
+        self, n_repeats, adapt=True, log_wnorm=False,
         mu=None,
         leak=None,
         eps=None,
@@ -162,7 +183,7 @@ class Sharc:
         lag=None,
         update_sign=None,
     ):
-
+        
         self.set(
             mu=mu,
             leak=leak,
@@ -173,25 +194,25 @@ class Sharc:
             lag=lag,
             update_sign=update_sign,
         )
+
+        source = np.tile(self.source, n_repeats)
+
         self.set_off(False)
         self.set_adapt(adapt)
 
-        source = np.tile(self.source, n_repeats)
+        if log_wnorm:
+            weight_thread = threading.Thread(
+                target=self._weight_logger,
+                args=(n_repeats,),
+                kwargs={"interval_s": len(self.source) / self.ad.fs},
+            )
+            weight_thread.start()
+
         self.error_log, self.ref_log = self.ad.play(left=source)
-        # for _ in range(n_repeats):
-            # self.error_log, self.ref_log = self.ad.play(left=self.source)
-
-            # weights, true_norm = self.midi_protocol.request_weights()
-            # self.weights = weights
-            # norm = np.linalg.norm(weights)
-
-            # self.w_norm_log.append(norm)
-            # self.true_norm_log.append(true_norm)
-
-            # if (abs(true_norm - norm) > 1e-4):
-                # print(f"Warning: weight norm is {true_norm:.6f}, which may indicate instability.")
-
         self.set_adapt(False)
+
+        if log_wnorm:
+            weight_thread.join()
 
         self.n_repeats = n_repeats
 
@@ -232,11 +253,10 @@ class Sharc:
             params = dict(zip(keys, combination))
 
             # Only set parameters explicitly supplied to grid_search().
-            self.set(**params)
 
             self.reset()
             print(f"Params: {params}")
-            db = self.cancel(n_repeats)
+            db = self.cancel(n_repeats, adapt=True, log_wnorm=False, **params)
             print()
 
             assert db is not None, f"No baseline available for n_repeats={n_repeats}"
@@ -244,14 +264,13 @@ class Sharc:
             if db < best_db:
                 best_db = db
                 best_params = params.copy()
-                # best_weights = self.weights.copy()
 
         print(
             f"Best Params: {best_params}, "
             f"Best ANC / No ANC: {best_db:.2f} dB"
         )
 
-        return best_params, best_db#, best_weights
+        return best_params, best_db
 
 
     def no_cancel(self, n_repeats):

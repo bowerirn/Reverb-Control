@@ -202,11 +202,11 @@ class MidiProtocol:
 
 
 
-    def receive_weights(self, timeout_seconds=10.0) -> tuple[np.ndarray, float]:
+    def receive_weights(self, verbose=True, timeout_s=10.0) -> tuple[np.ndarray, float]:
         expected_count = None
         weights = []
 
-        deadline = time.monotonic() + timeout_seconds
+        deadline = time.monotonic() + timeout_s
 
         while time.monotonic() < deadline:
             message = self.midi_in.poll()
@@ -227,7 +227,8 @@ class MidiProtocol:
                 )
 
                 weights.clear()
-                print(f"Weight transfer started: expecting {expected_count} values")
+                if verbose:
+                    print(f"Weight transfer started: expecting {expected_count} values")
 
             elif message_type == self.MIDI_TX_WEIGHT:
                 weights.append(self._decode_q15_message(message))
@@ -243,11 +244,12 @@ class MidiProtocol:
                 true_rms = (encoded_rms + 1.0) / 2.0
                 true_norm = true_rms * np.sqrt(expected_count)
 
-                print(f"Weight transfer complete: received {len(weights)} values")
+                if verbose:
+                    print(f"Weight transfer complete: received {len(weights)} values")
                 return np.asarray(weights, dtype=np.float32), true_norm
 
         raise TimeoutError(
-            f"Timed out after {timeout_seconds:.1f} seconds. "
+            f"Timed out after {timeout_s:.1f} seconds. "
             f"Received {len(weights)} weights."
         )
 
@@ -327,12 +329,12 @@ class MidiProtocol:
         )
     
 
-    def request_weights(self) -> np.ndarray:
+    def request_weights(self, verbose=True, timeout_s=10.0) -> np.ndarray:
         self._send_control(
             channel=self.MIDI_ANC_GET_WEIGHTS,
             controller=0,
             value=1,
         )
 
-        return self.receive_weights(timeout_seconds=10.0)
+        return self.receive_weights(verbose=verbose, timeout_s=timeout_s)
 
