@@ -11,29 +11,29 @@ import math
 class MidiProtocol:
     def __init__(self, input_name=None, output_name=None):
 
-        input_names = mido.get_input_names()
-        output_names = mido.get_output_names()
-
-        if input_name is None:
-            input_name = next(
-                name for name in input_names
-                if "USB2.0-MIDI" in name
-            )
-
-        if output_name is None:
-            output_name = next(
-                name for name in output_names
-                if "USB2.0-MIDI" in name
-                and "MIDIOUT2" not in name
-            )
-
-        self.input_name = input_name
-        self.output_name = output_name
-
-        print(f"\nUsing output: {self.output_name}")
-        print(f"Using input:  {self.input_name}")
-
         try:
+            input_names = mido.get_input_names()
+            output_names = mido.get_output_names()
+
+            if input_name is None:
+                input_name = next(
+                    name for name in input_names
+                    if "USB2.0-MIDI" in name
+                )
+
+            if output_name is None:
+                output_name = next(
+                    name for name in output_names
+                    if "USB2.0-MIDI" in name
+                    and "MIDIOUT2" not in name
+                )
+
+            self.input_name = input_name
+            self.output_name = output_name
+
+            print(f"\nUsing output: {self.output_name}")
+            print(f"Using input:  {self.input_name}")
+
             self.midi_in = mido.open_input(self.input_name)
             self.midi_out = mido.open_output(self.output_name)
 
@@ -80,6 +80,8 @@ class MidiProtocol:
         self.MIDI_ANC_RESET = 10
         self.MIDI_ANC_GET_WEIGHTS = 11
         self.MIDI_SEED_DELTA = 12
+        self.MIDI_ANC_GET_WNORM = 13
+        self.MIDI_ANC_LOAD_SEED = 14
 
 
         # ---------------------------------------------------------------------------
@@ -93,7 +95,7 @@ class MidiProtocol:
         self.MIDI_TX_WEIGHT = 0
         self.MIDI_TX_START = 1
         self.MIDI_TX_END = 2
-        self.MIDI_TX_STATUS = 3
+        self.MIDI_TX_WNORM = 3
 
 
     def close(self):
@@ -199,6 +201,34 @@ class MidiProtocol:
         )
 
 
+    def receive_wnorm(self, timeout_s=2.0) -> tuple[np.ndarray, float]:
+        deadline = time.monotonic() + timeout_s
+        filter_order = None
+
+        while time.monotonic() < deadline:
+            message = self.midi_in.poll()
+
+            if message is None:
+                time.sleep(0.001)
+                continue
+
+            if message.type != "control_change":
+                continue
+
+            message_type = (message.channel >> 2) & 0x03
+
+            if message_type == self.MIDI_TX_START:
+                filter_order = ( ((message.control & 0x7F) << 7)  |  (message.value & 0x7F) )
+
+            elif message_type == self.MIDI_TX_WNORM:
+                encoded_rms = self._decode_q15_message(message)
+                true_rms = (encoded_rms + 1.0) / 2.0
+                return true_rms * np.sqrt(filter_order)
+
+
+        raise TimeoutError(
+            f"Timed out after {timeout_s:.1f} seconds. "
+        )
 
 
 
@@ -327,14 +357,32 @@ class MidiProtocol:
             controller=0,
             value=1,
         )
-    
 
-    def request_weights(self, verbose=True, timeout_s=10.0) -> np.ndarray:
+
+    def load_seed(self) -> None:
         self._send_control(
-            channel=self.MIDI_ANC_GET_WEIGHTS,
+            channel=self.MIDI_ANC_LOAD_SEED,
             controller=0,
             value=1,
         )
+    
+
+    def request_weights(self, nonblocking=False, verbose=True, timeout_s=10.0) -> np.ndarray:
+        self._send_control(
+            channel=self.MIDI_ANC_GET_WEIGHTS,
+            controller=0,
+            value=1 if nonblocking else 0,
+        )
 
         return self.receive_weights(verbose=verbose, timeout_s=timeout_s)
+
+
+    def request_wnorm(self, nonblocking=True, timeout_s=2.0) -> np.ndarray:
+        self._send_control(
+            channel=self.MIDI_ANC_GET_WNORM,
+            controller=0,
+            value=1 if nonblocking else 0,
+        )
+
+        return self.receive_wnorm(timeout_s=timeout_s)
 

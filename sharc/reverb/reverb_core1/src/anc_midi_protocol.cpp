@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "anc_control.h"
+#include "filter_seed.h"
 #include "callback_midi_message.h"
 #include "common/audio_system_config.h"
 
@@ -31,7 +32,9 @@ enum AncMidiChannel {
     MIDI_ANC_OFF           = 9,
     MIDI_ANC_RESET         = 10,
     MIDI_ANC_GET_WEIGHTS   = 11,
-    MIDI_SEED_DELTA        = 12
+    MIDI_SEED_DELTA        = 12,
+    MIDI_ANC_GET_WNORM     = 13,
+    MIDI_ANC_LOAD_SEED     = 14
 };
 
 
@@ -44,7 +47,7 @@ enum MidiTxType {
     MIDI_TX_WEIGHT = 0,
     MIDI_TX_START  = 1,
     MIDI_TX_END    = 2,
-    MIDI_TX_STATUS = 3
+    MIDI_TX_WNORM = 3
 };
 
 
@@ -53,7 +56,14 @@ enum MidiTxType {
  * interrupt context.
  */
 static volatile bool anc_reset_requested = false;
+
 static volatile bool anc_transfer_requested = false;
+static volatile bool anc_transfer_requested_nonblocking = false;
+
+static volatile bool anc_wnorm_requested = false;
+static volatile bool anc_wnorm_requested_nonblocking = false;
+
+static volatile bool anc_seed_requested = false;
 
 
 /*
@@ -278,9 +288,9 @@ static bool send_weight_end(float rms) {
  */
 static bool transfer_weights() {
     const float* w = anc.weights();
-    while (!send_weight_start(FILTER_ORDER));
-
     float norm_sq = 0.0f;
+
+    while (!send_weight_start(FILTER_ORDER));
 
     for (int i = 0; i < FILTER_ORDER; i++) {
         while (!send_weight(w[i]));
@@ -290,6 +300,40 @@ static bool transfer_weights() {
     float rms = sqrtf(norm_sq / FILTER_ORDER);
 
     while (!send_weight_end(rms));
+
+    return true;
+}
+
+
+
+
+static bool send_wnorm() {
+    const float* w = anc.weights();
+    float norm_sq = 0.0f;
+
+    while (!send_weight_start(FILTER_ORDER));
+
+    for (int i = 0; i < FILTER_ORDER; i++) {
+        norm_sq += w[i] * w[i];
+    }
+
+    float rms = sqrtf(norm_sq / FILTER_ORDER);
+
+    const int16_t quantized = encode_weight_q15((2 * rms) - 1.0f); //[-1, 1]
+
+    uint8_t channel = 0u;
+    uint8_t controller = 0u;
+    uint8_t value = 0u;
+
+    pack_q15_midi(
+        quantized,
+        MIDI_TX_WNORM,
+        &channel,
+        &controller,
+        &value
+    );
+
+    while (!midi_send_control_change(channel, controller, value));
 
     return true;
 }
@@ -352,8 +396,24 @@ void process_midi_control_change(uint8_t channel, uint8_t controller, uint8_t va
             break;
 
         case MIDI_ANC_GET_WEIGHTS:
-            anc_transfer_requested = true;
+        {
+            if (value != 0u) {
+                anc_transfer_requested_nonblocking = true;
+            } else {
+                anc_transfer_requested = true;
+            }
             break;
+        }
+
+        case MIDI_ANC_GET_WNORM:
+        {
+            if (value != 0u) {
+                anc_wnorm_requested_nonblocking = true;
+            } else {
+                anc_wnorm_requested = true;
+            }
+            break;
+        }
 
         case MIDI_SEED_DELTA:
         {
@@ -366,6 +426,10 @@ void process_midi_control_change(uint8_t channel, uint8_t controller, uint8_t va
             break;
         }
 
+        case MIDI_ANC_LOAD_SEED:
+            anc_seed_requested = true;
+            break;
+
         default:
             break;
     }
@@ -376,7 +440,10 @@ void process_midi_control_change(uint8_t channel, uint8_t controller, uint8_t va
 
 
 void anc_midi_background_loop() {
-    if (anc_transfer_requested) {
+    if (anc_transfer_requested_nonblocking) {
+        anc_transfer_requested_nonblocking = false;
+        transfer_weights();
+    } else if (anc_transfer_requested) {
         anc_transfer_requested = false;
         anc_off = true;
         anc.adapt = false;
@@ -385,11 +452,33 @@ void anc_midi_background_loop() {
         anc.adapt = true;
     }
 
+    if (anc_wnorm_requested_nonblocking) {
+        anc_wnorm_requested_nonblocking = false;
+        send_wnorm();
+    } else if (anc_wnorm_requested) {
+        anc_wnorm_requested = false;
+        anc_off = true;
+        anc.adapt = false;
+        send_wnorm();
+        anc_off = false;
+        anc.adapt = true;
+    }
+
+
     if (anc_reset_requested) {
         anc_reset_requested = false;
         anc_off = true;
         anc.adapt = false;
         anc.reset();
+        anc_off = false;
+        anc.adapt = true;
+    }
+
+    if (anc_seed_requested) {
+        anc_seed_requested = false;
+        anc_off = true;
+        anc.adapt = false;
+        anc.seed_filter(seed, SEED_LEN, false);        
         anc_off = false;
         anc.adapt = true;
     }

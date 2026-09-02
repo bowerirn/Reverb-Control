@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 #include "math.h"
+#include "hp200.hpp"
 
 
 template<int N>
@@ -116,15 +117,12 @@ class FxLMS {
               feedback_ir_head(0),
               xnorm(0.0f),
               mavg(0.0f),
-              busy(false),
               update(false)
         {   
             reset();
         }
 
         void reset() {
-            while (busy);
-
             x_head = 0;
             path_ir_head = 0;
             feedback_ir_head = 0;
@@ -136,6 +134,9 @@ class FxLMS {
             max_step = 0.0f;
             min_xnorm = 1e30f;
             max_control = 0.0f;
+
+            ref_hp.reset();
+            error_hp.reset();
 
             for (int i = 0; i < M; i++) {
                 w[i] = 0.0f;
@@ -155,6 +156,24 @@ class FxLMS {
             }
         }
 
+        void seed_filter(const float* coeffs, int length, bool negate) {
+            const int n = (length < M) ? length : M;
+            
+            if (negate) {
+                for (int i = 0; i < n; i++) {
+                    w[i] = -coeffs[i];
+                }
+            } else {
+                for (int i = 0; i < n; i++) {
+                    w[i] = coeffs[i];
+                }
+            }
+
+            for (int i = n; i < M; i++) {
+                w[i] = 0.0f;
+            }
+        }
+
         void seed_delta(int delay, float amp) {
             if (delay >= 0 && delay < M) {
                 w[delay] = amp;
@@ -164,21 +183,24 @@ class FxLMS {
 
 
         float process(float ref, float error_mic) {
+            
             float predicted_feedback = duplicated_ring_dot<IR_LENGTH>(feedback_ir, z_feedback, feedback_ir_head);
             float cleaned_ref = ref - predicted_feedback;
             
-            float control = -cancel_gain * duplicated_ring_FIR<M>(cleaned_ref, w, x, &x_head);
+            float error_filtered = error_mic; //error_hp.process(error_mic);
+            float ref_filtered = cleaned_ref; //ref_hp.process(cleaned_ref);
+            
+            float control = -cancel_gain * duplicated_ring_FIR<M>(ref_filtered, w, x, &x_head);
 
             duplicated_ring_push<IR_LENGTH>(control, z_feedback, &feedback_ir_head);
 
 
             if (!adapt || mu == 0.0f) {
-                busy = false;
                 return control;
             }
 
 
-            float xf_sample = duplicated_ring_FIR<IR_LENGTH>(cleaned_ref, path_ir, z_path, &path_ir_head);
+            float xf_sample = duplicated_ring_FIR<IR_LENGTH>(ref_filtered, path_ir, z_path, &path_ir_head);
 
             float old = xf[x_head];
             xnorm += xf_sample * xf_sample- old * old;
@@ -193,7 +215,6 @@ class FxLMS {
             mavg = mavg_weight * mavg + (1.0f - mavg_weight) * xnorm;
             
             if (mavg < ref_threshold) {
-            	busy = false;
                 return control;
             }
 
@@ -213,7 +234,7 @@ class FxLMS {
                 return control;
             }
 
-            float update_scale = update_sign * step * error_mic;
+            float update_scale = update_sign * step * error_filtered;
             float decay = 1.0f - leak;
 
             int update_head = x_head + lag;
@@ -240,19 +261,16 @@ class FxLMS {
             }
 
 
-            busy = true;
             for (int k = 0; k < M; k++) {
                 w[k] = decay * w[k] + update_scale * xf_contiguous[k];
             }
-            busy = false;
 
             return control;
         }
 
 
-
+        // This is definitely not thread safe lol
         const float* weights() {
-            while (busy); // This doesn't actually work you'd need a mutex but that's slow lol
             return w;
         }
 
@@ -265,7 +283,6 @@ class FxLMS {
 
         bool update;
 
-        bool busy;
 
         const float* path_ir;
         const float* feedback_ir;
@@ -281,6 +298,9 @@ class FxLMS {
 
         float xnorm;
         float mavg;
+
+        Highpass200 ref_hp;
+        Highpass200 error_hp;
 
 };
 

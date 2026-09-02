@@ -7,14 +7,28 @@ from src.midi_protocol import MidiProtocol
 from itertools import product
 import time
 import threading
+from scipy.signal import butter, sosfilt, fftconvolve, welch
+from scipy.ndimage import gaussian_filter1d
+
+
+
 
 
 class Sharc:
     def __init__(self, source, ad: AudioDevice, midi_in=None, midi_out=None):
         self.ad = ad
-        self.source = source
+        self.sos_hp = butter(
+            6,
+            200,
+            btype="highpass",
+            fs=ad.fs,
+            output="sos",
+        )
+
+        self.source = source #self.highpass(source)
         self.no_cancels = {}
         self.midi_protocol = MidiProtocol(midi_in, midi_out)
+
 
         self.n_repeats = 1
         self.error_mic = []
@@ -74,6 +88,12 @@ class Sharc:
         if update_sign is not None and update_sign != self.update_sign:
             self.set_update_sign(update_sign) 
 
+
+
+    def highpass(self, x):
+        return sosfilt(self.sos_hp, x)
+
+
     def close(self):
         self.midi_protocol.close()
 
@@ -118,44 +138,192 @@ class Sharc:
     def seed_delta(self, index: int, amplitude: float = 1.0):
         self.midi_protocol.seed_delta(index, amplitude)
 
+    def load_seed(self):
+        self.reset()
+        self.midi_protocol.load_seed()
+
     def reset(self) -> None:
         self.midi_protocol.request_reset()
         self.w_norm_log = []
         self.error_log = []
+        self.true_norm_log = []
+        self.weights = np.array([])
 
     def get_weights(self) -> np.ndarray:
-        weights, true_norm = self.midi_protocol.request_weights()
+        weights, true_norm = self.midi_protocol.request_weights(nonblocking=False, verbose=True)
         self.weights = weights
         return weights
 
 
+    def get_wnorm(self) -> np.ndarray:
+        return self.midi_protocol.request_wnorm(nonblocking=False)
+
+    def _scheduler(self, schedule, setter, skip_first=True):
+        t0 = time.perf_counter()
+
+        if skip_first:
+            schedule = schedule[1:]
+
+        for var, t in schedule:
+            remaining = t - (time.perf_counter() - t0)
+
+            if remaining > 0:
+                time.sleep(remaining)
+
+            setter(var)
+
+
     def _weight_logger(self, n_requests, interval_s=5.0):
         for i in range(n_requests):
-            weights, true_norm = self.midi_protocol.request_weights(verbose=False)
+            weights, true_norm = self.midi_protocol.request_weights(nonblocking=True, verbose=False)
 
             norm = np.linalg.norm(weights)
 
             self.w_norm_log.append(norm)
             self.true_norm_log.append(true_norm)
+            self.weights = weights
 
             if abs(true_norm - norm) > 1e-4:
                 print(
                     f"Warning: weight norm mismatch: "
-                    f"{true_norm:.6f} vs {norm:.6f}"
+                    f"true = {true_norm:.6f}  vs  clipped = {norm:.6f}"
                 )
 
             if i < n_requests - 1:
                 time.sleep(interval_s)
 
+
+    def _wnorm_logger(self, n_requests, interval_s=5.0):
+        for i in range(n_requests):
+            true_norm = self.midi_protocol.request_wnorm(nonblocking=True, timeout_s=interval_s)
+
+            self.true_norm_log.append(true_norm)
+
+            if i < n_requests - 1:
+                time.sleep(interval_s)
+
+
     def save_irs(self):
         error_ir, ref_ir = measure_ir(self.ad)
         np.savez(self.ir_file, error_ir=error_ir, ref_ir=ref_ir)
+        return error_ir, ref_ir
 
-    def prep_irs(self, ir_len=256, panel_to_err_cm=4.5):
-
-        irs = np.load(self.ir_file)
+    def EE_irs(
+        self, 
+        irs=None, 
+        f_low=200, 
+        f_high=5_000, 
+        alpha=1.0, 
+        floor_frac=0.05,
+        ir_len=256,
+        panel_to_err_cm=4.5
+    ):
+        if irs is None:
+            irs = np.load(self.ir_file)
+        
         error_ir = irs['error_ir']
         ref_ir = irs['ref_ir']
+
+        NFFT = 1 << int(np.ceil(np.log2(max(len(error_ir), len(self.source)))))
+
+        S = np.fft.rfft(error_ir, n=NFFT)
+        X = np.fft.rfft(self.source, n=NFFT)
+        freqs = np.fft.rfftfreq(NFFT, d=1.0 / self.ad.fs)
+        band = (freqs >= f_low) & (freqs <= f_high)
+
+        S_mag = np.abs(S)
+        S_phase = np.angle(S)
+
+        X_mag = np.abs(X)
+        X_mag_smooth = gaussian_filter1d(X_mag, sigma=50)
+        X_floor = floor_frac * np.max(X_mag_smooth[band])
+        X_safe = np.maximum(X_mag_smooth, X_floor)
+
+        inverse_X = X_safe ** (-alpha)
+        scale = np.median(S_mag[band]) / np.median(inverse_X[band])
+
+        target_mag = scale * inverse_X
+
+        S_ee_mag = S_mag.copy()
+        S_ee_mag[band] = target_mag[band]
+
+        S_ee = S_ee_mag * np.exp(1j * S_phase)
+        ir_ee_raw = np.fft.irfft(S_ee, n=NFFT)
+
+        error_ir, ref_ir, ee_ir = align_irs_by_distance(
+            error_ir, ref_ir, ir_ee_raw,
+            distance_cm=panel_to_err_cm, 
+            ir_len=ir_len, 
+            fs=self.ad.fs
+        )
+
+        plt.plot(error_ir, label='panel_ir')
+        plt.plot(ee_ir, label='EE_ir')
+        plt.plot(ref_ir, label='ref_ir')
+        plt.legend()
+        plt.show()
+
+        self.plot_ir_spectra(error_ir, ee_ir, f_low, f_high)
+
+        self.write_ir(ee_ir, ref_ir, self.panel_ir_h)
+        return error_ir, ee_ir, ref_ir
+
+
+    def plot_ir_spectra(self, error_ir, ee_ir, f_low, f_high):
+        xf_normal = fftconvolve(
+            self.source,
+            error_ir,
+            mode="full",
+        )[:len(self.source)]
+
+        xf_ee = fftconvolve(
+            self.source,
+            ee_ir,
+            mode="full",
+        )[:len(self.source)]
+
+        f, P_normal = welch(
+            xf_normal,
+            fs=self.ad.fs,
+            nperseg=16384,
+        )
+
+        _, P_ee = welch(
+            xf_ee,
+            fs=self.ad.fs,
+            nperseg=16384,
+        )
+
+        plt.figure(figsize=(10, 5))
+
+        plt.semilogx(
+            f,
+            10 * np.log10(P_normal + 1e-20),
+            label="Normal xf",
+        )
+
+        plt.semilogx(
+            f,
+            10 * np.log10(P_ee + 1e-20),
+            label="EE xf",
+        )
+
+        plt.xlim(f_low, f_high)
+        plt.xlabel("Frequency (Hz)")
+        plt.ylabel("PSD (dB/Hz)")
+        plt.title("Filtered Reference: Normal vs EE")
+        plt.grid(True, which="both")
+        plt.legend()
+        plt.show()
+
+    def prep_irs(self, irs=None, ir_len=256, panel_to_err_cm=4.5):
+
+        if irs is None:
+            irs = np.load(self.ir_file)
+
+        error_ir = irs['error_ir']
+        ref_ir = irs['ref_ir']
+
         
         error_ir, ref_ir = align_irs_by_distance(
             error_ir, ref_ir, 
@@ -169,11 +337,12 @@ class Sharc:
         plt.legend()
 
         self.write_ir(error_ir, ref_ir, self.panel_ir_h)
+        return error_ir, ref_ir
 
 
 
     def cancel(
-        self, n_repeats, adapt=True, log_wnorm=False,
+        self, n_repeats, adapt=True, log_weights=False, log_wnorm=True,
         mu=None,
         leak=None,
         eps=None,
@@ -183,10 +352,12 @@ class Sharc:
         lag=None,
         update_sign=None,
     ):
-        
+        schedule_mu = isinstance(mu, list)
+        schedule_leak = isinstance(leak, list)
+
         self.set(
-            mu=mu,
-            leak=leak,
+            mu=mu if not schedule_mu else mu[0][0],
+            leak=leak if not schedule_leak else leak[0][0],
             eps=eps,
             cancel_gain=cancel_gain,
             ref_threshold=ref_threshold,
@@ -200,19 +371,50 @@ class Sharc:
         self.set_off(False)
         self.set_adapt(adapt)
 
-        if log_wnorm:
+        if adapt and log_weights:
             weight_thread = threading.Thread(
                 target=self._weight_logger,
                 args=(n_repeats,),
                 kwargs={"interval_s": len(self.source) / self.ad.fs},
             )
             weight_thread.start()
+        elif adapt and log_wnorm:
+            weight_thread = threading.Thread(
+                target=self._wnorm_logger,
+                args=(n_repeats,),
+                kwargs={"interval_s": len(self.source) / self.ad.fs},
+            )
+            weight_thread.start()
 
-        self.error_log, self.ref_log = self.ad.play(left=source)
+        if schedule_mu:
+            mu_thread = threading.Thread(
+                target=self._scheduler,
+                args=(mu, self.set_mu),
+            )
+            mu_thread.start()
+
+        if schedule_leak:
+            leak_thread = threading.Thread(
+                target=self._scheduler,
+                args=(leak, self.set_leak),
+            )
+            leak_thread.start()
+
+        error_mic, ref_mic = self.ad.play(left=source)
         self.set_adapt(False)
+        
+        self.error_log = error_mic #self.highpass(error_mic)
+        self.ref_log = ref_mic# self.highpass(ref_mic)
 
-        if log_wnorm:
+
+        if adapt and (log_wnorm or log_weights):
             weight_thread.join()
+
+        if schedule_leak:
+            leak_thread.join()
+
+        if schedule_mu:
+            mu_thread.join()
 
         self.n_repeats = n_repeats
 
@@ -256,7 +458,7 @@ class Sharc:
 
             self.reset()
             print(f"Params: {params}")
-            db = self.cancel(n_repeats, adapt=True, log_wnorm=False, **params)
+            db = self.cancel(n_repeats, adapt=True, log_weights=False, log_wnorm=False, **params)
             print()
 
             assert db is not None, f"No baseline available for n_repeats={n_repeats}"
@@ -278,10 +480,11 @@ class Sharc:
 
         self.set_adapt(False)
         self.set_off(True)
-        error_mic, self.ref_log = self.ad.play(left=source)
+        error_mic, ref_mic = self.ad.play(left=source)
         self.set_off(False)
-        
-        self.no_cancels[n_repeats] = error_mic
+
+        self.ref_log = ref_mic #self.highpass(ref_mic)
+        self.no_cancels[n_repeats] = error_mic #self.highpass(error_mic)
 
     
     def write_ir(self, error_ir, ref_ir, path='.'):
@@ -370,7 +573,7 @@ class Sharc:
 
     def plot_w_norm(self, title_ext=''):
         plt.figure(figsize=(8, 4))
-        plt.plot(np.asarray(self.w_norm_log))
+        plt.plot(np.asarray(self.true_norm_log or self.w_norm_log))
         plt.xlabel("Update Step")
         plt.ylabel(r"$||w||_2$")
         plt.title(f"Adaptive Filter Weight Norm {title_ext}")

@@ -24,6 +24,8 @@ env/
 
 .metadata/
 
+*.npz
+
 # Build directories
 **/Debug/
 **/Release/
