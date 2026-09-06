@@ -18,3 +18,4 @@ I wonder if just using plain LMS would work.
 I also need to compare with the EE-IR
 
 ### Next Steps
+- Investigate the distribution discrepancies

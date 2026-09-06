@@ -4,7 +4,7 @@ I realized that it might be because the ref mic was like right inside the speake
 So I measured the ref again but I moved it up centered with the speaker, and then again but moved further back.
 It seems that moving it back definitely made a big difference.
 
-Band                 old error centered     error     further error      old ref    centered ref    further ref
+Band                 old error       centered error   further error      old ref    centered ref    further ref
    0- 200 Hz             1.86%              1.84%          1.80%         22.24%         21.11%         13.52%
  200- 300 Hz            11.88%             11.85%         12.17%         48.03%         46.05%         33.52%
  300- 700 Hz            62.39%             62.10%         62.89%         26.98%         28.68%         41.89%

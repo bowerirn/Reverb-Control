@@ -184,8 +184,8 @@ class FxLMS {
 
         float process(float ref, float error_mic) {
             
-            float predicted_feedback = duplicated_ring_dot<IR_LENGTH>(feedback_ir, z_feedback, feedback_ir_head);
-            float cleaned_ref = ref - predicted_feedback;
+            // float predicted_feedback = duplicated_ring_dot<IR_LENGTH>(feedback_ir, z_feedback, feedback_ir_head);
+            float cleaned_ref = ref; // - predicted_feedback;
             
             float error_filtered = error_mic; //error_hp.process(error_mic);
             float ref_filtered = cleaned_ref; //ref_hp.process(cleaned_ref);
