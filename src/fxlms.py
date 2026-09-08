@@ -62,9 +62,12 @@ class FxLMS:
         self.mses = []
         self.db_reductions = []
 
+
     @property
     def pred(self):
         return lfilter(self.w, [1.0], self.ref)
+
+
 
     def reset(self):
         self.x.fill(0)

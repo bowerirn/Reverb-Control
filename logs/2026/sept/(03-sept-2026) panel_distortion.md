@@ -25,7 +25,7 @@ I tried with IR len 256 and 512, both normal and EE IRs.
 I can pretty confidently say that 256 is better than 512 now for IR length.
 I did several grid searches in every setting and 256 always outperformed 512,
 even accounting for extra time to learn given the extra information.
-Also in this case I the EE-IR struggled a lot, I'm not sure exactly the reason for it.
+Also in this case the EE-IR struggled a lot, I'm not sure exactly the reason for it.
 But we know now that the error mic should be closer to the panel.
 I still want to run those straightforward experiments now that the setup is (maybe) optimized.
 
