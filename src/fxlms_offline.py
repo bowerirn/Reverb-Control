@@ -236,13 +236,30 @@ class OfflineFxLMS:
         panel_head = 0
 
 
+        delay_samples = self.lag
+
+        if delay_samples > 0:
+            control_delay = np.zeros(delay_samples, dtype=self.dtype)
+            delay_head = 0
+
+
 
         for n in range(N):
 
             control_n, cleaned_ref_n = self.compute_control(ref_nc[n], clean_feedback=clean_feedback)
             control[n] = control_n
 
-            y_panel, panel_head = self._ring_fir(control_n, panel_ir, panel_state, panel_head, self.IR_LENGTH)
+            if delay_samples > 0:
+                delayed_control = control_delay[delay_head]
+                control_delay[delay_head] = control_n
+
+                delay_head += 1
+                if delay_head >= delay_samples:
+                    delay_head = 0
+            else:
+                delayed_control = control_n
+
+            y_panel, panel_head = self._ring_fir(delayed_control, panel_ir, panel_state, panel_head, self.IR_LENGTH)
             panel_output[n] = y_panel
 
             e_n = error_nc[n] + y_panel
