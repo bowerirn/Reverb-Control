@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 class OfflineFxLMS:
@@ -30,12 +31,17 @@ class OfflineFxLMS:
         self.update_sign = dtype(1.0)
 
         self.lag = 86
+
+        
+
         self.adapt = False
 
         self.ref_threshold = dtype(3e-4)
-        self.mavg_weight = dtype(0.999896)
+        self.mavg_tau_ms = dtype(100)
+        self.mavg_weight = np.exp(-1.0 / (self.mavg_tau_ms * 0.001 * self.fs))
 
         self.reset()
+
 
     def reset(self):
         M = self.M
@@ -43,6 +49,7 @@ class OfflineFxLMS:
         dtype = self.dtype
 
         self.x_head = 0
+        self.xf_head = 0
         self.path_ir_head = 0
         self.feedback_ir_head = 0
 
@@ -61,10 +68,48 @@ class OfflineFxLMS:
 
         # Duplicated ring buffers
         self.x = np.zeros(2 * M, dtype=dtype)
-        self.xf = np.zeros(2 * M, dtype=dtype)
+
+        self.XF_LEN = M + self.lag
+        self.xf = np.zeros(2 * self.XF_LEN, dtype=dtype)
+
 
         self.z_path = np.zeros(2 * L, dtype=dtype)
         self.z_feedback = np.zeros(2 * L, dtype=dtype)
+
+        self.xnorm_history = np.zeros(M, dtype=self.dtype)
+
+
+    def set(
+        self,
+        mu=None,
+        eps=None,
+        leak=None,
+        cancel_gain=None,
+        update_sign=None,
+        lag=None,
+        ref_threshold=None,
+        mavg_tau_ms=None,
+    ):
+        if mu is not None:
+            self.mu = self.dtype(mu)
+        if eps is not None:
+            self.eps = self.dtype(eps)
+        if leak is not None:
+            self.leak = self.dtype(leak)
+        if cancel_gain is not None:
+            self.cancel_gain = self.dtype(cancel_gain)
+        if update_sign is not None:
+            self.update_sign = self.dtype(update_sign)
+        if lag is not None:
+            self.lag = int(lag)
+            self.reset()
+        if ref_threshold is not None:
+            self.ref_threshold = self.dtype(ref_threshold)
+        if mavg_tau_ms is not None:
+            self.mavg_tau_ms = int(mavg_tau_ms)
+            self.mavg_weight = np.exp(-1.0 / (self.mavg_tau_ms * 0.001 * self.fs))
+    
+
 
     # ------------------------------------------------------------------
     # Duplicated-ring helpers
@@ -77,10 +122,11 @@ class OfflineFxLMS:
         if head < 0:
             head = N - 1
 
+        old = state[head]
         state[head] = new_sample
         state[head + N] = new_sample
 
-        return head
+        return head, old
 
     @staticmethod
     def _ring_dot(coeffs, state, head, N):
@@ -90,7 +136,7 @@ class OfflineFxLMS:
     @classmethod
     def _ring_fir(cls, new_sample, coeffs, state, head, N):
 
-        head = cls._ring_push( new_sample, state, head, N)
+        head, _ = cls._ring_push( new_sample, state, head, N)
         y = cls._ring_dot(coeffs, state, head, N)
 
         return y, head
@@ -123,7 +169,7 @@ class OfflineFxLMS:
         control = -self.cancel_gain * control_raw
 
         if clean_feedback:
-            self.feedback_ir_head = self._ring_push(control, self.z_feedback, self.feedback_ir_head, self.IR_LENGTH)
+            self.feedback_ir_head, _ = self._ring_push(control, self.z_feedback, self.feedback_ir_head, self.IR_LENGTH)
 
         abs_control = abs(control)
         
@@ -139,19 +185,34 @@ class OfflineFxLMS:
 
         xf_sample, self.path_ir_head = self._ring_fir(cleaned_ref, self.path_ir, self.z_path, self.path_ir_head, self.IR_LENGTH)
 
-        old = self.xf[self.x_head]
-        self.xnorm = self.xnorm + xf_sample * xf_sample - old * old
+        # old = self.xf[self.xf_head - self.lag]
+        # self.xnorm = self.xnorm + xf_sample * xf_sample - old * old
+
+        # if self.xnorm < 0.0:
+        #     self.xnorm = 0.0
+
+
+        self.xf_head, old = self._ring_push(xf_sample, self.xf, self.xf_head, self.XF_LEN)
+
+        
+        update_head = self.xf_head + self.lag
+
+        if update_head >= self.XF_LEN:
+            update_head -= self.XF_LEN
+        
+
+        newest = self.xf[update_head]
+        self.xnorm += newest * newest - old * old
 
         if self.xnorm < 0.0:
             self.xnorm = 0.0
 
-        self.xf[self.x_head] = xf_sample
-        self.xf[self.x_head + self.M] = xf_sample
 
         self.mavg = self.mavg_weight * self.mavg + (1.0 - self.mavg_weight) * self.xnorm
-    
+                    
         if self.mavg < self.ref_threshold:
             return 
+
 
 
         step = self.mu
@@ -159,18 +220,15 @@ class OfflineFxLMS:
         if self.NLMS:
             step = self.mu / (self.eps + self.xnorm)
 
-        self.update = not self.update
 
+        self.update = not self.update
         if not self.update:
             return 
 
+        
         update_scale = self.update_sign * step * error_mic
         decay = 1.0 - self.leak
 
-        update_head = self.x_head + self.lag
-
-        if update_head >= self.M:
-            update_head -= self.M
 
         xf_contiguous = self.xf[update_head:update_head + self.M]
 
@@ -181,6 +239,8 @@ class OfflineFxLMS:
         if step > self.max_step:
             self.max_step = step
 
+        self.debug_xf = xf_contiguous.copy()
+        self.debug_update_head = update_head
 
         self.w[:] = decay * self.w + update_scale * xf_contiguous
 
@@ -210,7 +270,30 @@ class OfflineFxLMS:
         adapt=True,
         clean_feedback=False,
         save_weight_every_s=None,
+        plot=True,
+
+        system_lag=None,
+
+        mu=None,
+        eps=None,
+        leak=None,
+        cancel_gain=None,
+        update_sign=None,
+        lag=None,
+        ref_threshold=None,
+        mavg_tau_ms=None,
     ):
+        
+        self.set(
+            mu=mu,
+            eps=eps,
+            leak=leak,
+            cancel_gain=cancel_gain,
+            update_sign=update_sign,
+            lag=lag,
+            ref_threshold=ref_threshold,
+            mavg_tau_ms=mavg_tau_ms,
+        )
 
         ref_nc = np.asarray(ref_nc, dtype=self.dtype)
         error_nc = np.asarray(error_nc, dtype=self.dtype)
@@ -236,10 +319,10 @@ class OfflineFxLMS:
         panel_head = 0
 
 
-        delay_samples = self.lag
+        system_delay = int(self.lag) if system_lag is None else system_lag
 
-        if delay_samples > 0:
-            control_delay = np.zeros(delay_samples, dtype=self.dtype)
+        if system_delay > 0:
+            control_delay = np.zeros(system_delay, dtype=self.dtype)
             delay_head = 0
 
 
@@ -249,12 +332,12 @@ class OfflineFxLMS:
             control_n, cleaned_ref_n = self.compute_control(ref_nc[n], clean_feedback=clean_feedback)
             control[n] = control_n
 
-            if delay_samples > 0:
+            if system_delay > 0:
                 delayed_control = control_delay[delay_head]
                 control_delay[delay_head] = control_n
 
                 delay_head += 1
-                if delay_head >= delay_samples:
+                if delay_head >= system_delay:
                     delay_head = 0
             else:
                 delayed_control = control_n
@@ -272,6 +355,24 @@ class OfflineFxLMS:
 
         if save_weight_every_s is not None:
             weight_history = np.asarray(weight_history)
+
+        db_reduction = 10 * np.log10(
+            (np.mean(simulated_error**2) + 1e-20) /
+            (np.mean(error_nc**2) + 1e-20)
+        )
+
+        print(f"Simulated ANC / No ANC: {db_reduction:.2f} dB")
+
+        if plot:
+            plt.plot(error_nc, label="No Cancel")
+            plt.plot(simulated_error, label="Simulated Cancel")
+
+            plt.title(f"Simululated Error Mic Signal  (update_lag={self.lag})")
+            plt.xlabel("Samples")
+            plt.ylabel("Amplitude")
+            plt.legend(loc='upper right')
+            plt.grid(True)
+            plt.show()
 
         return (
             control,

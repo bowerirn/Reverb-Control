@@ -45,7 +45,8 @@ class Sharc:
         self.cancel_gain = None
         self.ref_threshold = None
         self.mavg_tau_ms = None
-        self.lag = None
+        # self.lag = None
+        self.clean_feedback = None
         self.update_sign = None
 
         if self.midi_protocol.connected:
@@ -56,7 +57,8 @@ class Sharc:
                 cancel_gain=0.1,
                 ref_threshold=3e-4,
                 mavg_tau_ms=100,
-                lag=86,
+                clean_feedback=False,
+                # lag=86,
                 update_sign=1,
             )
 
@@ -68,7 +70,8 @@ class Sharc:
         cancel_gain=None,
         ref_threshold=None,
         mavg_tau_ms=None,
-        lag=None,
+        # lag=None,
+        clean_feedback=None,
         update_sign=None,
     ):
         if mu is not None and mu != self.mu:
@@ -83,8 +86,10 @@ class Sharc:
             self.set_ref_threshold(ref_threshold)
         if mavg_tau_ms is not None and mavg_tau_ms != self.mavg_tau_ms:
             self.set_mavg_tau_ms(mavg_tau_ms)
-        if lag is not None and lag != self.lag:
-            self.set_lag(lag)
+        # if lag is not None and lag != self.lag:
+        #     self.set_lag(lag)
+        if clean_feedback is not None and clean_feedback != self.clean_feedback:
+             self.set_clean_feedback(clean_feedback)
         if update_sign is not None and update_sign != self.update_sign:
             self.set_update_sign(update_sign) 
 
@@ -121,9 +126,13 @@ class Sharc:
         self.midi_protocol.set_mavg_tau_ms(tau_ms)
         self.mavg_tau_ms = tau_ms
 
-    def set_lag(self, lag: int):
-        self.midi_protocol.set_lag(lag)
-        self.lag = lag
+    # def set_lag(self, lag: int):
+    #     self.midi_protocol.set_lag(lag)
+    #     self.lag = lag
+
+    def set_clean_feedback(self, clean_feedback: bool):
+        self.midi_protocol.set_clean_feedback(clean_feedback)
+        self.clean_feedback = clean_feedback
 
     def set_update_sign(self, sign: int) -> None:
         self.midi_protocol.set_update_sign(sign)
@@ -349,7 +358,8 @@ class Sharc:
         cancel_gain=None,
         ref_threshold=None,
         mavg_tau_ms=None,
-        lag=None,
+        # lag=None,
+        clean_feedback=None,
         update_sign=None,
     ):
         schedule_mu = isinstance(mu, list)
@@ -362,7 +372,8 @@ class Sharc:
             cancel_gain=cancel_gain,
             ref_threshold=ref_threshold,
             mavg_tau_ms=mavg_tau_ms,
-            lag=lag,
+            # lag=lag,
+            clean_feedback=clean_feedback,
             update_sign=update_sign,
         )
 
@@ -400,7 +411,7 @@ class Sharc:
             )
             leak_thread.start()
 
-        error_mic, ref_mic = self.ad.play(left=source)
+        error_mic, ref_mic = self.ad.play(left=source, right=source)
         self.set_adapt(False)
         
         self.error_log = error_mic #self.highpass(error_mic)

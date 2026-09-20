@@ -229,7 +229,7 @@ void processaudio_setup(void)
  */
 
 
-
+extern volatile float max_ref = 0.0f;
 
 
 // When debugging audio algorithms, helpful to comment out this pragma for more linear single stepping.
@@ -240,48 +240,37 @@ void processaudio_callback(void) {
        float error_mic = audiochannel_0_left_in[i];
        float ref = audiochannel_0_right_in[i];
 
+       if (ref > max_ref) {
+    	   max_ref = ref;
+       }
+
 
        float control = anc.process(ref, error_mic);
-//	   audiochannel_0_left_out[i] = ref;
+
+       if (anc.updating) {
+		   gpio_write(GPIO_SHARC_SAM_LED11, GPIO_HIGH);
+       } else {
+		   gpio_write(GPIO_SHARC_SAM_LED11, GPIO_LOW);
+	   }
+
 
        if (anc_off) {
            audiochannel_0_left_out[i] = 0.0f;
        }
        else {
-    	   if (control > 0.2f) {
-    		   control = 0.2f;
-    		   gpio_write(GPIO_SHARC_SAM_LED11, GPIO_HIGH);
-    	   } else if (control < -0.2f) {
-    		   control = -0.2f;
-    		   gpio_write(GPIO_SHARC_SAM_LED11, GPIO_HIGH);
-    	   }
+//    	   if (control > 0.2f) {
+//    		   control = 0.2f;
+//    		   gpio_write(GPIO_SHARC_SAM_LED11, GPIO_HIGH);
+//    	   } else if (control < -0.2f) {
+//    		   control = -0.2f;
+//    		   gpio_write(GPIO_SHARC_SAM_LED11, GPIO_HIGH);
+//    	   }
            audiochannel_0_left_out[i] = control;
        }
 
       audiochannel_0_right_out[i] = 0.0f;
 
-//      if (light) {
-//    	  gpio_write(GPIO_SHARC_SAM_LED12, GPIO_HIGH);
-//      } else {
-//    	  gpio_write(GPIO_SHARC_SAM_LED12, GPIO_LOW);
-//      }
    }
-
-
-	// Otherwise, perform our C-based block processing here!
-	// for (int i = 0; i < AUDIO_BLOCK_SIZE; i++) {
-
-	// 	// Default: Pass audio just from 1/8" (or 1/4" on Audio Project Fin) inputs to outputs
-	// 	if (!anc_off) {
-	// 		audiochannel_0_left_out[i] = audiochannel_0_left_in[i];
-	// 	} else {
-	// 		audiochannel_0_left_out[i] = 0.0f;
-	// 	}
-
-	// 	audiochannel_0_right_out[i] = 0.0f;
-
-	// }
-	
 
 
 }

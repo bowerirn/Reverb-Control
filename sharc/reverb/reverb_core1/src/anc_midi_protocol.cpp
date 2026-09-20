@@ -27,7 +27,7 @@ enum AncMidiChannel {
     MIDI_ANC_REF_THRESHOLD = 4,
     MIDI_ANC_MAVG_TAU_MS   = 5,
     MIDI_ANC_UPDATE_SIGN   = 6,
-    MIDI_ANC_LAG           = 7,
+    MIDI_ANC_CLEAN_FEEDBACK           = 7,
     MIDI_ANC_ADAPT         = 8,
     MIDI_ANC_OFF           = 9,
     MIDI_ANC_RESET         = 10,
@@ -379,8 +379,8 @@ void process_midi_control_change(uint8_t channel, uint8_t controller, uint8_t va
             anc.update_sign = (value == 0u) ? -1.0f : 1.0f;
             break;
 
-        case MIDI_ANC_LAG:
-            anc.lag = (int)decode_midi_u14(controller, value);
+        case MIDI_ANC_CLEAN_FEEDBACK:
+            anc.clean_feedback = (value != 0u);
             break;
 
         case MIDI_ANC_ADAPT:

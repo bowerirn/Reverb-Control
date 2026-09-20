@@ -74,7 +74,8 @@ class MidiProtocol:
         self.MIDI_ANC_REF_THRESHOLD = 4
         self.MIDI_ANC_MAVG_TAU_MS = 5
         self.MIDI_ANC_UPDATE_SIGN = 6
-        self.MIDI_ANC_LAG = 7
+        # self.MIDI_ANC_LAG = 7
+        self.MIDI_ANC_CLEAN_FEEDBACK = 7
         self.MIDI_ANC_ADAPT = 8
         self.MIDI_ANC_OFF = 9
         self.MIDI_ANC_RESET = 10
@@ -305,9 +306,13 @@ class MidiProtocol:
     def set_mavg_tau_ms(self, tau_ms: int):
         self.send_u14(channel=self.MIDI_ANC_MAVG_TAU_MS, value=tau_ms)
 
-    def set_lag(self, lag: int):
-        self.send_u14(channel=self.MIDI_ANC_LAG, value=lag)
+    # def set_lag(self, lag: int):
+    #     self.send_u14(channel=self.MIDI_ANC_LAG, value=lag)
     
+
+    def set_clean_feedback(self, clean_feedback: bool):
+        self.send_bool(channel=self.MIDI_ANC_CLEAN_FEEDBACK, value=clean_feedback)
+
     def set_update_sign(self, sign: int) -> None:
         assert sign in (-1, 1), "Update sign must be -1 or +1."
         self.send_bool(channel=self.MIDI_ANC_UPDATE_SIGN, value=(sign == 1))
