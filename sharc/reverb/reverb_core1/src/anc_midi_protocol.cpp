@@ -12,6 +12,8 @@
 
 #include "audio_framework_selector.h"
 
+#include "sine_sweep.h"
+
 
 /*
  * Each incoming Control Change channel identifies one ANC command.
@@ -32,9 +34,10 @@ enum AncMidiChannel {
     MIDI_ANC_OFF           = 9,
     MIDI_ANC_RESET         = 10,
     MIDI_ANC_GET_WEIGHTS   = 11,
-    MIDI_SEED_DELTA        = 12,
+    MIDI_SINE_SWEEP        = 12,
     MIDI_ANC_GET_WNORM     = 13,
-    MIDI_ANC_LOAD_SEED     = 14
+    MIDI_ANC_LOAD_SEED     = 14,
+    MIDI_ANC_LAG           = 15
 };
 
 
@@ -368,6 +371,10 @@ void process_midi_control_change(uint8_t channel, uint8_t controller, uint8_t va
             anc.ref_threshold = decode_small_float(controller, value);
             break;
 
+        case MIDI_ANC_LAG:
+            anc.set_lag((int)decode_midi_u14(controller, value));
+            break;
+
         case MIDI_ANC_MAVG_TAU_MS: 
         {
             const uint16_t tau_ms = decode_midi_u14(controller, value);
@@ -395,6 +402,16 @@ void process_midi_control_change(uint8_t channel, uint8_t controller, uint8_t va
             anc_reset_requested = true;
             break;
 
+        case MIDI_SINE_SWEEP:
+        {
+            if (value != 0u) {
+                sine_sweep.start();
+            } else {
+                sine_sweep.stop();
+            }
+            break;
+        }
+
         case MIDI_ANC_GET_WEIGHTS:
         {
             if (value != 0u) {
@@ -415,16 +432,16 @@ void process_midi_control_change(uint8_t channel, uint8_t controller, uint8_t va
             break;
         }
 
-        case MIDI_SEED_DELTA:
-        {
-            int index;
-            float amplitude;
+        // case MIDI_SEED_DELTA:
+        // {
+        //     int index;
+        //     float amplitude;
 
-            decode_seed_delta(controller, value, &index, &amplitude);
+        //     decode_seed_delta(controller, value, &index, &amplitude);
 
-            anc.seed_delta(index, amplitude);
-            break;
-        }
+        //     anc.seed_delta(index, amplitude);
+        //     break;
+        // }
 
         case MIDI_ANC_LOAD_SEED:
             anc_seed_requested = true;

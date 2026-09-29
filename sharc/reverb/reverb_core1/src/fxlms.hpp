@@ -55,11 +55,11 @@ inline float duplicated_ring_dot(
 }
 
 
-template<int N>
 inline float duplicated_ring_push(
     float new_sample,
     float* state,
-    int* head
+    int* head,
+    int N
 ) {
     int h = *head - 1;
 
@@ -80,7 +80,7 @@ inline float duplicated_ring_push(
 
 
 
-template<int M, int IR_LENGTH, int LAG, bool NLMS>
+template<int M, int IR_LENGTH, bool NLMS>
 class FxLMS {
     
     public:
@@ -95,7 +95,6 @@ class FxLMS {
         float max_step;
         float min_xnorm;
         float max_control;
-        bool updating;
         bool clean_feedback;
 
         FxLMS(const float* error_ir, const float* ref_ir)
@@ -111,10 +110,10 @@ class FxLMS {
               max_control(0.0f),
               min_xnorm(1e30f),
               max_step(0.0f),
-			  updating(false),
               clean_feedback(false),
-
-            //private
+              
+              //private
+              lag(92),
               path_ir(error_ir),
               feedback_ir(ref_ir),
               x_head(0),
@@ -123,8 +122,19 @@ class FxLMS {
               feedback_ir_head(0),
               mavg(0.0f),
               xnorm(0),
-              update(false)
+              update(false),
+              xf(0)
         {   
+            reset();
+        }
+
+
+        void set_lag(int new_lag) {
+            if (new_lag < 0) {
+                new_lag = 0;
+            }
+
+            lag = new_lag;
             reset();
         }
 
@@ -136,12 +146,15 @@ class FxLMS {
             xnorm = 0.0f;
             mavg = 0.0f;
             update = false;
-            updating = false;
 
             
             max_step = 0.0f;
             min_xnorm = 1e30f;
             max_control = 0.0f;
+
+
+            delete[] xf;
+            xf = new float[2 * (M + lag)]();
 
 
             for (int i = 0; i < M; i++) {
@@ -150,10 +163,6 @@ class FxLMS {
 
             for (int i = 0; i < 2 * M; i++) {
                 x[i] = 0.0f;
-            }
-
-            for (int i = 0; i < 2 * (M + LAG); i++) {
-                xf[i] = 0.0f;
             }
 
 
@@ -202,7 +211,9 @@ class FxLMS {
                         
             float control = -cancel_gain * duplicated_ring_FIR<M>(cleaned_ref, w, x, &x_head);
 
-            duplicated_ring_push<IR_LENGTH>(control, z_feedback, &feedback_ir_head);
+            if (clean_feedback) {
+                duplicated_ring_push(control, z_feedback, &feedback_ir_head, IR_LENGTH);
+            }
 
 
             if (!adapt || mu == 0.0f) {
@@ -213,13 +224,13 @@ class FxLMS {
             float xf_sample = duplicated_ring_FIR<IR_LENGTH>(cleaned_ref, path_ir, z_path, &path_ir_head);
 
 
-            float old = duplicated_ring_push<M + LAG>(xf_sample, xf, &xf_head);
+            float old = duplicated_ring_push(xf_sample, xf, &xf_head, M + lag);
 
 
-            int update_head = xf_head + LAG;
+            int update_head = xf_head + lag;
 
-            if (update_head >= M + LAG) {
-                update_head -= M + LAG;
+            if (update_head >= M + lag) {
+                update_head -= M + lag;
             }
 
 
@@ -286,15 +297,20 @@ class FxLMS {
         }
 
 
+    ~FxLMS() {
+        delete[] xf;
+    }
 
     private:
         float w[M];
         float x[2 * M];
-        float xf[2 * (M + LAG)];
+        float* xf;
 
         float xnorm;
 
         bool update;
+
+        int lag;
 
 
         const float* path_ir;
@@ -312,5 +328,4 @@ class FxLMS {
         float mavg;
 
 };
-
 

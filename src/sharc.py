@@ -45,7 +45,7 @@ class Sharc:
         self.cancel_gain = None
         self.ref_threshold = None
         self.mavg_tau_ms = None
-        # self.lag = None
+        self.lag = None
         self.clean_feedback = None
         self.update_sign = None
 
@@ -58,7 +58,7 @@ class Sharc:
                 ref_threshold=3e-4,
                 mavg_tau_ms=100,
                 clean_feedback=False,
-                # lag=86,
+                lag=86,
                 update_sign=1,
             )
 
@@ -70,7 +70,7 @@ class Sharc:
         cancel_gain=None,
         ref_threshold=None,
         mavg_tau_ms=None,
-        # lag=None,
+        lag=None,
         clean_feedback=None,
         update_sign=None,
     ):
@@ -86,12 +86,14 @@ class Sharc:
             self.set_ref_threshold(ref_threshold)
         if mavg_tau_ms is not None and mavg_tau_ms != self.mavg_tau_ms:
             self.set_mavg_tau_ms(mavg_tau_ms)
-        # if lag is not None and lag != self.lag:
-        #     self.set_lag(lag)
         if clean_feedback is not None and clean_feedback != self.clean_feedback:
              self.set_clean_feedback(clean_feedback)
         if update_sign is not None and update_sign != self.update_sign:
             self.set_update_sign(update_sign) 
+
+            
+        if lag is not None and lag != self.lag:
+            self.set_lag(lag)
 
 
 
@@ -126,9 +128,9 @@ class Sharc:
         self.midi_protocol.set_mavg_tau_ms(tau_ms)
         self.mavg_tau_ms = tau_ms
 
-    # def set_lag(self, lag: int):
-    #     self.midi_protocol.set_lag(lag)
-    #     self.lag = lag
+    def set_lag(self, lag: int):
+        self.midi_protocol.set_lag(lag)
+        self.lag = lag
 
     def set_clean_feedback(self, clean_feedback: bool):
         self.midi_protocol.set_clean_feedback(clean_feedback)
@@ -144,8 +146,11 @@ class Sharc:
     def set_off(self, off: bool) -> None:   
         self.midi_protocol.set_off(off)
 
-    def seed_delta(self, index: int, amplitude: float = 1.0):
-        self.midi_protocol.seed_delta(index, amplitude)
+    def sine_sweep(self, on=True):
+        self.midi_protocol.sine_sweep(on)
+
+    # def seed_delta(self, index: int, amplitude: float = 1.0):
+    #     self.midi_protocol.seed_delta(index, amplitude)
 
     def load_seed(self):
         self.reset()
@@ -210,6 +215,37 @@ class Sharc:
 
             if i < n_requests - 1:
                 time.sleep(interval_s)
+
+
+    def sharc_irs(self, f0=150, f1=22_000):
+        error_mic, ref_mic = self.record_sine_sweep(duration=10.5)
+
+        sweep = make_sharc_sweep(fs=96_000)
+
+        error_ir = estimate_ir(error_mic, sweep, fs=self.ad.fs, f0=f0, f1=f1)
+        ref_ir = estimate_ir(ref_mic, sweep, fs=self.ad.fs, f0=f0, f1=f1)
+
+        np.savez(self.ir_file, error_ir=error_ir, ref_ir=ref_ir)
+        return error_ir, ref_ir
+
+
+
+    def record_sine_sweep(self, duration=10.5):
+        n = int(duration * self.ad.fs)
+        silence = np.zeros(n, dtype=np.float32)
+
+        self.midi_protocol.sine_sweep(True)
+
+        try:
+            error_mic, ref_mic = self.ad.play(
+                left=silence,
+                right=silence
+            )
+        finally:
+            self.midi_protocol.sine_sweep(False)
+
+        return error_mic, ref_mic
+
 
 
     def save_irs(self):
@@ -325,7 +361,7 @@ class Sharc:
         plt.legend()
         plt.show()
 
-    def prep_irs(self, irs=None, ir_len=256, panel_to_err_cm=4.5):
+    def prep_irs(self, irs=None, ir_len=256, panel_to_err_cm=4.5, negate=False):
 
         if irs is None:
             irs = np.load(self.ir_file)
@@ -340,6 +376,10 @@ class Sharc:
             ir_len=ir_len, 
             fs=self.ad.fs
         )
+
+        if negate:
+            error_ir = -error_ir
+            ref_ir = -ref_ir
 
         plt.plot(error_ir, label='panel_ir')
         plt.plot(ref_ir, label='ref_ir')
@@ -358,7 +398,7 @@ class Sharc:
         cancel_gain=None,
         ref_threshold=None,
         mavg_tau_ms=None,
-        # lag=None,
+        lag=None,
         clean_feedback=None,
         update_sign=None,
     ):
@@ -372,7 +412,7 @@ class Sharc:
             cancel_gain=cancel_gain,
             ref_threshold=ref_threshold,
             mavg_tau_ms=mavg_tau_ms,
-            # lag=lag,
+            lag=lag,
             clean_feedback=clean_feedback,
             update_sign=update_sign,
         )

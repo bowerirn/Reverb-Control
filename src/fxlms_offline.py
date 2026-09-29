@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import math
 
 
 class OfflineFxLMS:
@@ -126,7 +127,7 @@ class OfflineFxLMS:
         state[head] = new_sample
         state[head + N] = new_sample
 
-        return head, old
+        return old, head
 
     @staticmethod
     def _ring_dot(coeffs, state, head, N):
@@ -136,7 +137,7 @@ class OfflineFxLMS:
     @classmethod
     def _ring_fir(cls, new_sample, coeffs, state, head, N):
 
-        head, _ = cls._ring_push( new_sample, state, head, N)
+        _, head = cls._ring_push(new_sample, state, head, N)
         y = cls._ring_dot(coeffs, state, head, N)
 
         return y, head
@@ -169,7 +170,7 @@ class OfflineFxLMS:
         control = -self.cancel_gain * control_raw
 
         if clean_feedback:
-            self.feedback_ir_head, _ = self._ring_push(control, self.z_feedback, self.feedback_ir_head, self.IR_LENGTH)
+            _, self.feedback_ir_head = self._ring_push(control, self.z_feedback, self.feedback_ir_head, self.IR_LENGTH)
 
         abs_control = abs(control)
         
@@ -192,7 +193,7 @@ class OfflineFxLMS:
         #     self.xnorm = 0.0
 
 
-        self.xf_head, old = self._ring_push(xf_sample, self.xf, self.xf_head, self.XF_LEN)
+        old, self.xf_head = self._ring_push(xf_sample, self.xf, self.xf_head, self.XF_LEN)
 
         
         update_head = self.xf_head + self.lag
@@ -247,7 +248,15 @@ class OfflineFxLMS:
 
 
 
-
+    def reduction_db(self, cancelled, baseline):
+        """
+        Negative = reduction.
+        Example: -5 dB means cancelled signal has 5 dB less power.
+        """
+        return 10 * np.log10(
+            (np.mean(cancelled**2) + 1e-20) /
+            (np.mean(baseline**2) + 1e-20)
+        )
 
 
     def diagnostics(self):
@@ -270,9 +279,12 @@ class OfflineFxLMS:
         adapt=True,
         clean_feedback=False,
         save_weight_every_s=None,
-        plot=True,
+        plot=False,
 
         system_lag=None,
+        panel_ir=None,
+
+        poison_ref = True,
 
         mu=None,
         eps=None,
@@ -298,7 +310,7 @@ class OfflineFxLMS:
         ref_nc = np.asarray(ref_nc, dtype=self.dtype)
         error_nc = np.asarray(error_nc, dtype=self.dtype)
 
-        panel_ir = self.path_ir
+        panel_ir = self.path_ir if panel_ir is None else panel_ir
 
         self.adapt = bool(adapt)
 
@@ -320,35 +332,46 @@ class OfflineFxLMS:
 
 
         system_delay = int(self.lag) if system_lag is None else system_lag
+        assert system_delay > 0, "System delay must be greater than 0"
 
-        if system_delay > 0:
-            control_delay = np.zeros(system_delay, dtype=self.dtype)
-            delay_head = 0
+        control_buf = np.zeros(system_delay, dtype=self.dtype)
+        control_head = 0
 
-
+       
 
         for n in range(N):
 
-            control_n, cleaned_ref_n = self.compute_control(ref_nc[n], clean_feedback=clean_feedback)
-            control[n] = control_n
+            delayed_control = control_buf[control_head]
 
-            if system_delay > 0:
-                delayed_control = control_delay[delay_head]
-                control_delay[delay_head] = control_n
+            _, panel_head = self._ring_push(delayed_control, panel_state, panel_head, self.IR_LENGTH)
 
-                delay_head += 1
-                if delay_head >= system_delay:
-                    delay_head = 0
-            else:
-                delayed_control = control_n
 
-            y_panel, panel_head = self._ring_fir(delayed_control, panel_ir, panel_state, panel_head, self.IR_LENGTH)
-            panel_output[n] = y_panel
+            y_panel = self._ring_dot(panel_ir, panel_state, panel_head, self.IR_LENGTH)
+            ref_feedback = self._ring_dot(self.feedback_ir, panel_state, panel_head, self.IR_LENGTH)
+
 
             e_n = error_nc[n] + y_panel
+
+            poisoned_ref = ref_nc[n]
+            if poison_ref:
+                poisoned_ref += ref_feedback
+
+
+            control_n, cleaned_ref_n = self.compute_control(poisoned_ref, clean_feedback=clean_feedback)
+
+
+            control[n] = control_n
+            panel_output[n] = y_panel
             simulated_error[n] = e_n
 
             self.process(cleaned_ref_n, e_n)
+
+
+            control_buf[control_head] = control_n
+            control_head += 1
+            if control_head >= system_delay:
+                control_head = 0
+
 
             if n % save_weight == 0:
                 weight_history.append(self.w.copy())
@@ -356,23 +379,14 @@ class OfflineFxLMS:
         if save_weight_every_s is not None:
             weight_history = np.asarray(weight_history)
 
-        db_reduction = 10 * np.log10(
-            (np.mean(simulated_error**2) + 1e-20) /
-            (np.mean(error_nc**2) + 1e-20)
-        )
+        db_reduction = self.reduction_db(simulated_error, error_nc)
 
         print(f"Simulated ANC / No ANC: {db_reduction:.2f} dB")
 
         if plot:
-            plt.plot(error_nc, label="No Cancel")
-            plt.plot(simulated_error, label="Simulated Cancel")
-
-            plt.title(f"Simululated Error Mic Signal  (update_lag={self.lag})")
-            plt.xlabel("Samples")
-            plt.ylabel("Amplitude")
-            plt.legend(loc='upper right')
-            plt.grid(True)
-            plt.show()
+            self.plot_error_mic(error_nc, simulated_error)
+            self.plot_loss_curve(error_nc, simulated_error)
+            
 
         return (
             control,
@@ -380,3 +394,49 @@ class OfflineFxLMS:
             panel_output,
             weight_history,
         )
+    
+
+
+
+
+
+
+
+    def plot_loss_curve(self, error_nc, simulated_error, window_sec=5.0):
+        N = min(len(simulated_error), len(error_nc))
+        
+        win = int(window_sec * self.fs)
+
+        t = []
+        loss = []
+        for start in range(0, N - win + 1, win):
+            end = start + win
+
+            loss.append(self.reduction_db(simulated_error[start:end], error_nc[start:end]))
+
+            # center of window
+            t.append((start + win / 2) / self.fs)
+
+        plt.plot(t, loss, linewidth=2, label="dB Reduction Curve", marker='o')
+
+        plt.xlabel("Time (s)")
+        plt.ylabel("Error Reduction (dB)")
+        plt.title("Cancellation Over Time")
+
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+
+
+
+    def plot_error_mic(self, error_nc, simulated_error):
+        plt.plot(error_nc, label="No Cancel")
+        plt.plot(simulated_error, label="Simulated Cancel")
+
+        plt.title(f"Simululated Error Mic Signal")
+        plt.xlabel("Samples")
+        plt.ylabel("Amplitude")
+        plt.legend(loc='upper right')
+        plt.grid(True)
+        plt.show()

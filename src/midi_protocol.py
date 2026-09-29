@@ -74,15 +74,16 @@ class MidiProtocol:
         self.MIDI_ANC_REF_THRESHOLD = 4
         self.MIDI_ANC_MAVG_TAU_MS = 5
         self.MIDI_ANC_UPDATE_SIGN = 6
-        # self.MIDI_ANC_LAG = 7
         self.MIDI_ANC_CLEAN_FEEDBACK = 7
         self.MIDI_ANC_ADAPT = 8
         self.MIDI_ANC_OFF = 9
         self.MIDI_ANC_RESET = 10
         self.MIDI_ANC_GET_WEIGHTS = 11
-        self.MIDI_SEED_DELTA = 12
+        # self.MIDI_SEED_DELTA = 12
+        self.MIDI_SINE_SWEEP = 12
         self.MIDI_ANC_GET_WNORM = 13
         self.MIDI_ANC_LOAD_SEED = 14
+        self.MIDI_ANC_LAG = 15
 
 
         # ---------------------------------------------------------------------------
@@ -306,8 +307,8 @@ class MidiProtocol:
     def set_mavg_tau_ms(self, tau_ms: int):
         self.send_u14(channel=self.MIDI_ANC_MAVG_TAU_MS, value=tau_ms)
 
-    # def set_lag(self, lag: int):
-    #     self.send_u14(channel=self.MIDI_ANC_LAG, value=lag)
+    def set_lag(self, lag: int):
+        self.send_u14(channel=self.MIDI_ANC_LAG, value=lag)
     
 
     def set_clean_feedback(self, clean_feedback: bool):
@@ -323,6 +324,9 @@ class MidiProtocol:
     def set_off(self, off: bool) -> None:
         self.send_bool(channel=self.MIDI_ANC_OFF, value=off)
 
+
+    def sine_sweep(self, on=True):
+        self.send_bool(channel=self.MIDI_SINE_SWEEP, value=on)
 
 
     def seed_delta(self, index: int, amplitude: float = 1.0):

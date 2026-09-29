@@ -9,4 +9,4 @@
 
 extern volatile bool anc_off;
 
-extern FxLMS<FILTER_ORDER, IR_LEN, LAG, NLMS> anc;
+extern FxLMS<FILTER_ORDER, IR_LEN, NLMS> anc;

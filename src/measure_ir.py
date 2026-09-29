@@ -20,6 +20,66 @@ def make_sweep(fs=96_000, duration=6.0, f0=150, f1=22_000, fade=0.02):
     return sweep
 
 
+
+
+
+def make_sharc_sweep(
+    fs=96_000,
+    duration=6.0,
+    f0=150.0,
+    f1=22_000.0,
+    fade=0.02,
+    amplitude=0.5,
+):
+    N = int(fs * duration)
+    fade_N = int(fs * fade)
+
+    beta = np.float32(
+        np.log(np.float32(f1 / f0)) / np.float32(duration)
+    )
+
+    q = np.float32(
+        np.exp(beta / np.float32(fs))
+    )
+
+    phase_scale = np.float32(
+        np.float32(2.0 * np.pi) * np.float32(f0) / beta
+    )
+
+    z = np.float32(1.0)
+
+    sweep = np.empty(N, dtype=np.float32)
+
+    for n in range(N):
+        fade_gain = np.float32(1.0)
+
+        if n < fade_N:
+            fade_gain = np.float32(n) / np.float32(fade_N - 1)
+
+        elif n >= N - fade_N:
+            fade_gain = (
+                np.float32(N - 1 - n) /
+                np.float32(fade_N - 1)
+            )
+
+        phase = np.float32(
+            phase_scale * np.float32(z - np.float32(1.0))
+        )
+
+        sweep[n] = np.float32(
+            np.float32(amplitude) *
+            fade_gain *
+            np.sin(phase)
+        )
+
+        z = np.float32(z * q)
+
+    return sweep
+
+
+
+
+
 def estimate_ir(recorded, sweep, fs=96_000, f0=150, f1=22_000):
     duration = len(sweep) / fs
     t = np.arange(len(sweep)) / fs
@@ -113,7 +173,7 @@ def align_irs_by_distance(primary_ir, *other_irs, distance_cm=4.5, ir_len=128, f
     
     out = []
     for ir in [primary_ir, *other_irs]:
-        if end > len(primary_ir):
+        if end > len(ir):
             temp = np.zeros(ir_len, dtype=primary_ir.dtype)
             available = ir[start:]
             temp[:len(available)] = available

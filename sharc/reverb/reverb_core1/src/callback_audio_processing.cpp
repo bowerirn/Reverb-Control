@@ -28,7 +28,7 @@
 #include "fxlms.hpp"
 #include "panel_ir.h"
 #include "anc_control.h"
-
+#include "sine_sweep.h"
 
 
 /*
@@ -236,39 +236,42 @@ extern volatile float max_ref = 0.0f;
 #pragma optimize_for_speed
 void processaudio_callback(void) {
 
-   for (int i = 0; i < AUDIO_BLOCK_SIZE; i++) {
-       float error_mic = audiochannel_0_left_in[i];
-       float ref = audiochannel_0_right_in[i];
+    for (int i = 0; i < AUDIO_BLOCK_SIZE; i++) {
+        float error_mic = audiochannel_0_left_in[i];
+        float ref = audiochannel_0_right_in[i];
 
-       if (ref > max_ref) {
-    	   max_ref = ref;
-       }
-
-
-       float control = anc.process(ref, error_mic);
-
-       if (anc.updating) {
-		   gpio_write(GPIO_SHARC_SAM_LED11, GPIO_HIGH);
-       } else {
-		   gpio_write(GPIO_SHARC_SAM_LED11, GPIO_LOW);
-	   }
+        if (ref > max_ref) {
+    		max_ref = ref;
+        }
 
 
-       if (anc_off) {
-           audiochannel_0_left_out[i] = 0.0f;
-       }
-       else {
-//    	   if (control > 0.2f) {
-//    		   control = 0.2f;
-//    		   gpio_write(GPIO_SHARC_SAM_LED11, GPIO_HIGH);
-//    	   } else if (control < -0.2f) {
-//    		   control = -0.2f;
-//    		   gpio_write(GPIO_SHARC_SAM_LED11, GPIO_HIGH);
-//    	   }
-           audiochannel_0_left_out[i] = control;
-       }
+		bool sweeping = sine_sweep.active();
 
-      audiochannel_0_right_out[i] = 0.0f;
+		float control;
+
+		if (sweeping) {
+			control = sine_sweep.process();
+		} else {
+			control = anc.process(ref, error_mic);
+		}
+
+		if (!sweeping && anc_off) {
+			audiochannel_0_left_out[i] = 0.0f;
+		}
+		else {
+			if (!sweeping && control > 0.15f) {
+				control = 0.15f;
+				gpio_write(GPIO_SHARC_SAM_LED11, GPIO_HIGH);
+			}
+			else if (!sweeping && control < -0.15f) {
+				control = -0.15f;
+				gpio_write(GPIO_SHARC_SAM_LED11, GPIO_HIGH);
+			}
+
+			audiochannel_0_left_out[i] = control;
+		}
+
+		audiochannel_0_right_out[i] = 0.0f;
 
    }
 
