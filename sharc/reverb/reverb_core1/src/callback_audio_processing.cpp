@@ -29,6 +29,7 @@
 #include "panel_ir.h"
 #include "anc_control.h"
 #include "sine_sweep.h"
+#include "tone.hpp"
 
 
 /*
@@ -240,43 +241,47 @@ void processaudio_callback(void) {
         float error_mic = audiochannel_0_left_in[i];
         float ref = audiochannel_0_right_in[i];
 
+
+		audiochannel_0_right_out[i] = 0.0f;
+
+
         if (ref > max_ref) {
     		max_ref = ref;
         }
 
-
 		bool sweeping = sine_sweep.active();
+		bool pure_tone = tone.active();
 
 		float control;
 
 		if (sweeping) {
-			control = sine_sweep.process();
-		} else {
-			control = anc.process(ref, error_mic);
+			audiochannel_0_left_out[i] = sine_sweep.process();
+			continue;
+		}
+		if (pure_tone) {
+			audiochannel_0_left_out[i] = tone.process();
+			continue;
 		}
 
-		if (!sweeping && anc_off) {
-			audiochannel_0_left_out[i] = 0.0f;
-		}
-		else {
-			if (!sweeping && control > 0.15f) {
-				control = 0.15f;
-				gpio_write(GPIO_SHARC_SAM_LED11, GPIO_HIGH);
-			}
-			else if (!sweeping && control < -0.15f) {
-				control = -0.15f;
-				gpio_write(GPIO_SHARC_SAM_LED11, GPIO_HIGH);
-			}
 
-			audiochannel_0_left_out[i] = control;
+		control = anc.process(ref, error_mic);
+
+		if (anc_off) {
+			control = 0.0f;
+		} else if (control > 0.15f) {
+			control = 0.15f;
+			gpio_write(GPIO_SHARC_SAM_LED11, GPIO_HIGH);
+		}
+		else if (control < -0.15f) {
+			control = -0.15f;
+			gpio_write(GPIO_SHARC_SAM_LED11, GPIO_HIGH);
 		}
 
-		audiochannel_0_right_out[i] = 0.0f;
-
-   }
-
-
+		audiochannel_0_left_out[i] = control;
+	}
 }
+
+
 
 #if (USE_BOTH_CORES_TO_PROCESS_AUDIO)
 

@@ -327,8 +327,8 @@ class OfflineFxLMS:
         else:
             save_weight = N + 1
 
-        panel_state = np.zeros(2 * self.IR_LENGTH, dtype=self.dtype)
-        panel_head = 0
+        delayed_control_state = np.zeros(2 * self.IR_LENGTH, dtype=self.dtype)
+        delayed_control_head = 0
 
 
         system_delay = int(self.lag) if system_lag is None else system_lag
@@ -343,11 +343,10 @@ class OfflineFxLMS:
 
             delayed_control = control_buf[control_head]
 
-            _, panel_head = self._ring_push(delayed_control, panel_state, panel_head, self.IR_LENGTH)
+            _, control_head = self._ring_push(delayed_control, delayed_control_state, delayed_control_head, self.IR_LENGTH)
 
-
-            y_panel = self._ring_dot(panel_ir, panel_state, panel_head, self.IR_LENGTH)
-            ref_feedback = self._ring_dot(self.feedback_ir, panel_state, panel_head, self.IR_LENGTH)
+            y_panel = self._ring_dot(panel_ir, delayed_control_state, delayed_control_head, self.IR_LENGTH)
+            ref_feedback = self._ring_dot(self.feedback_ir, delayed_control_state, delayed_control_head, self.IR_LENGTH)
 
 
             e_n = error_nc[n] + y_panel

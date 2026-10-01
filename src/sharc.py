@@ -149,6 +149,12 @@ class Sharc:
     def sine_sweep(self, on=True):
         self.midi_protocol.sine_sweep(on)
 
+    def pure_tone(self, freq, amp, on=True):
+        self.midi_protocol.pure_tone(freq, amp, on)
+
+    def stop_tone(self):
+        self.midi_protocol.stop_test_signal()
+
     # def seed_delta(self, index: int, amplitude: float = 1.0):
     #     self.midi_protocol.seed_delta(index, amplitude)
 
@@ -220,7 +226,7 @@ class Sharc:
     def sharc_irs(self, f0=150, f1=22_000):
         error_mic, ref_mic = self.record_sine_sweep(duration=10.5)
 
-        sweep = make_sharc_sweep(fs=96_000)
+        sweep = make_sharc_sweep(fs=96_000, f0=f0, f1=f1)
 
         error_ir = estimate_ir(error_mic, sweep, fs=self.ad.fs, f0=f0, f1=f1)
         ref_ir = estimate_ir(ref_mic, sweep, fs=self.ad.fs, f0=f0, f1=f1)
@@ -559,6 +565,26 @@ class Sharc:
             for v in ref_ir:
                 f.write(f"    {float(v):.9e}f,\n")
             f.write("};\n")
+
+
+
+
+
+
+    def tone_response(self, x, freq):
+        N = len(x)
+        phase = 2 * np.pi * freq * np.arange(N) / self.ad.fs
+
+        a = 2/N * np.dot(x, np.cos(phase))
+        b = 2/N * np.dot(x, np.sin(phase))
+
+        amplitude = np.sqrt(a*a + b*b)
+        phase_rad = np.arctan2(-b, a)
+
+        return amplitude, phase_rad
+
+
+
 
 
 

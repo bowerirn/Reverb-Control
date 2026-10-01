@@ -80,7 +80,7 @@ class MidiProtocol:
         self.MIDI_ANC_RESET = 10
         self.MIDI_ANC_GET_WEIGHTS = 11
         # self.MIDI_SEED_DELTA = 12
-        self.MIDI_SINE_SWEEP = 12
+        self.MIDI_PLAY_TONE = 12
         self.MIDI_ANC_GET_WNORM = 13
         self.MIDI_ANC_LOAD_SEED = 14
         self.MIDI_ANC_LAG = 15
@@ -325,8 +325,47 @@ class MidiProtocol:
         self.send_bool(channel=self.MIDI_ANC_OFF, value=off)
 
 
+
+
+    def stop_test_signal(self):
+        self._send_control(
+            channel=self.MIDI_PLAY_TONE,
+            controller=0,
+            value=0,
+        )
+
+
     def sine_sweep(self, on=True):
-        self.send_bool(channel=self.MIDI_SINE_SWEEP, value=on)
+        if not on:
+            self.stop_test_signal()
+            return
+
+        self._send_control(
+            channel=self.MIDI_PLAY_TONE,
+            controller=0x40,
+            value=0,
+        )
+
+
+    def pure_tone(self, freq, amp, on=True):
+        if not on:
+            self.stop_test_signal()
+            return
+
+        assert 100 <= freq <= 12_700, "Frequency must be between 100 and 12700 Hz."
+        assert 0.01 <= amp <= 0.63, "Amplitude must be between 0.01 and 0.63."
+
+        freq_code = round(freq / 100)
+        amp_code = round(amp * 100)
+
+        controller = 0x40 | amp_code
+
+        self._send_control(
+            channel=self.MIDI_PLAY_TONE,
+            controller=controller,
+            value=freq_code,
+        )
+
 
 
     def seed_delta(self, index: int, amplitude: float = 1.0):

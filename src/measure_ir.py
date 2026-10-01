@@ -31,22 +31,21 @@ def make_sharc_sweep(
     fade=0.02,
     amplitude=0.5,
 ):
-    N = int(fs * duration)
-    fade_N = int(fs * fade)
+    FS = np.float32(fs)
+    F0 = np.float32(f0)
+    F1 = np.float32(f1)
 
-    beta = np.float32(
-        np.log(np.float32(f1 / f0)) / np.float32(duration)
-    )
+    DURATION = np.float32(duration)
+    AMPLITUDE = np.float32(amplitude)
+    FADE_DURATION = np.float32(fade)
 
-    q = np.float32(
-        np.exp(beta / np.float32(fs))
-    )
+    TWO_PI = np.float32(6.2831853071795864769)
 
-    phase_scale = np.float32(
-        np.float32(2.0 * np.pi) * np.float32(f0) / beta
-    )
+    N = int(FS * DURATION)
+    fade_N = int(FS * FADE_DURATION)
 
-    z = np.float32(1.0)
+    beta = np.float32(np.log(F1 / F0) / DURATION)
+    phase_scale = np.float32(TWO_PI * F0 / beta)
 
     sweep = np.empty(N, dtype=np.float32)
 
@@ -57,22 +56,13 @@ def make_sharc_sweep(
             fade_gain = np.float32(n) / np.float32(fade_N - 1)
 
         elif n >= N - fade_N:
-            fade_gain = (
-                np.float32(N - 1 - n) /
-                np.float32(fade_N - 1)
-            )
+            fade_gain = np.float32(N - 1 - n) / np.float32(fade_N - 1)
 
-        phase = np.float32(
-            phase_scale * np.float32(z - np.float32(1.0))
-        )
+        t = np.float32(n) / FS
+        z = np.exp(beta * t)
+        phase = phase_scale * (z - np.float32(1.0))
 
-        sweep[n] = np.float32(
-            np.float32(amplitude) *
-            fade_gain *
-            np.sin(phase)
-        )
-
-        z = np.float32(z * q)
+        sweep[n] = AMPLITUDE * fade_gain * np.cos(phase)
 
     return sweep
 

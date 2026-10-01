@@ -13,6 +13,7 @@
 #include "audio_framework_selector.h"
 
 #include "sine_sweep.h"
+#include "tone.hpp"
 
 
 /*
@@ -34,7 +35,7 @@ enum AncMidiChannel {
     MIDI_ANC_OFF           = 9,
     MIDI_ANC_RESET         = 10,
     MIDI_ANC_GET_WEIGHTS   = 11,
-    MIDI_SINE_SWEEP        = 12,
+    MIDI_PLAY_TONE         = 12,
     MIDI_ANC_GET_WNORM     = 13,
     MIDI_ANC_LOAD_SEED     = 14,
     MIDI_ANC_LAG           = 15
@@ -342,6 +343,8 @@ static bool send_wnorm() {
 }
 
 
+
+
 /*
  * Interpret one complete incoming MIDI Control Change message.
  *
@@ -402,13 +405,31 @@ void process_midi_control_change(uint8_t channel, uint8_t controller, uint8_t va
             anc_reset_requested = true;
             break;
 
-        case MIDI_SINE_SWEEP:
+        case MIDI_PLAY_TONE:
         {
-            if (value != 0u) {
-                sine_sweep.start();
-            } else {
+            bool active = controller & 0x40;
+            uint8_t amp_code = controller & 0x3F;
+            uint8_t freq_code = value & 0x7F;
+
+            if (!active) {
                 sine_sweep.stop();
+                tone.stop();
             }
+            else if (amp_code == 0 && freq_code == 0) {
+                tone.stop();
+                sine_sweep.start();
+            }
+            else {
+                sine_sweep.stop();
+
+                float amplitude = (float) amp_code / 100.0f;
+                float frequency = (float) freq_code * 100.0f;
+
+                tone.set_amplitude(amplitude);
+                tone.set_frequency(frequency);
+                tone.start();
+            }
+
             break;
         }
 
