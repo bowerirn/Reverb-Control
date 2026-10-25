@@ -396,6 +396,17 @@ class Sharc:
 
 
 
+    def reduction_db(self, cancelled, baseline):
+        return 10 * np.log10(
+            (np.mean(cancelled**2) + 1e-20) /
+            (np.mean(baseline**2) + 1e-20)
+        )
+
+
+
+
+
+
     def cancel(
         self, n_repeats, adapt=True, log_weights=False, log_wnorm=True,
         mu=None,
@@ -459,6 +470,7 @@ class Sharc:
 
         error_mic, ref_mic = self.ad.play(left=source, right=source)
         self.set_adapt(False)
+        self.set_off(True)
         
         self.error_log = error_mic #self.highpass(error_mic)
         self.ref_log = ref_mic# self.highpass(ref_mic)
@@ -483,10 +495,7 @@ class Sharc:
             err = err[:n]
             nc = nc[:n]
 
-            db = 10 * np.log10(
-                (np.mean(err**2) + 1e-20) /
-                (np.mean(nc**2) + 1e-20)
-            )
+            db = self.reduction_db(err, nc)
 
             print(f"Overall ANC / No ANC: {db:.2f} dB")
 
@@ -728,6 +737,40 @@ class Sharc:
         plt.xlabel("Time [s]")
         plt.ylabel("ANC / No ANC [dB]")
         plt.title(f"Error Level Relative to No ANC ({window_s:.2f} s window)")
+        plt.show()
+
+
+
+
+
+    def plot_loss_curve(self, window_sec=1.0):
+        error = self.error_log
+        error_nc = self.no_cancels.get(self.n_repeats, [])
+
+        assert error_nc is not None, f"No baseline recording found for n_repeats={self.n_repeats}."
+
+        N = min(len(error), len(error_nc))
+        
+        win = int(window_sec * self.ad.fs)
+
+        t = []
+        loss = []
+        for start in range(0, N - win + 1, win):
+            end = start + win
+
+            loss.append(self.reduction_db(error[start:end], error_nc[start:end]))
+
+            # center of window
+            t.append((start + win / 2) / self.ad.fs)
+
+        plt.plot(t, loss, linewidth=2, label="dB Reduction Curve", marker='o')
+
+        plt.xlabel("Time (s)")
+        plt.ylabel("Error Reduction (dB)")
+        plt.title("Cancellation Over Time")
+
+        plt.legend()
+        plt.tight_layout()
         plt.show()
 
 

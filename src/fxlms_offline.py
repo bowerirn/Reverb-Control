@@ -343,7 +343,7 @@ class OfflineFxLMS:
 
             delayed_control = control_buf[control_head]
 
-            _, control_head = self._ring_push(delayed_control, delayed_control_state, delayed_control_head, self.IR_LENGTH)
+            _, delayed_control_head = self._ring_push(delayed_control, delayed_control_state, delayed_control_head, self.IR_LENGTH)
 
             y_panel = self._ring_dot(panel_ir, delayed_control_state, delayed_control_head, self.IR_LENGTH)
             ref_feedback = self._ring_dot(self.feedback_ir, delayed_control_state, delayed_control_head, self.IR_LENGTH)
