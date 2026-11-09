@@ -1,0 +1,177 @@
+#pragma once
+
+#include <stddef.h>
+#include "math.h"
+
+extern volatile bool nonlinear;
+
+inline float duplicated_ring_push(float sample, float* state, int* head, int n) {
+    const int h = *head == 0 ? n - 1 : *head - 1;
+    const float old = state[h];
+    state[h] = state[h + n] = sample;
+    *head = h;
+    return old;
+}
+
+template<int N>
+inline float duplicated_ring_dot(const float* coeffs, const float* state, int head) {
+    const float* history = state + head;
+    float sum = 0.0f;
+    for (int k = 0; k < N; ++k)
+        sum += coeffs[k] * history[k];
+    return sum;
+}
+
+template<int N>
+inline float duplicated_ring_FIR(float sample, const float* coeffs, float* state, int* head) {
+    duplicated_ring_push(sample, state, head, N);
+    return duplicated_ring_dot<N>(coeffs, state, *head);
+}
+
+template<int M, int IR_LENGTH, bool NLMS>
+class FxLMS {
+public:
+    float mu, eps, leak, cancel_gain, update_sign;
+    bool adapt;
+    float ref_threshold, mavg_weight, max_step, min_xnorm, max_control;
+    bool clean_feedback;
+
+    FxLMS(const float* error_ir, const float* ref_ir)
+        : mu(1e-4f), eps(1e-6f), leak(3e-7f), cancel_gain(0.02f),
+          update_sign(1.0f), adapt(false), ref_threshold(3e-4f),
+          mavg_weight(0.999896f), max_step(0), min_xnorm(1e30f),
+          max_control(0), clean_feedback(false), lag(92),
+          path_ir(error_ir), feedback_ir(ref_ir), xf(new float[6 * (M + lag)]) {
+        reset();
+    }
+
+    ~FxLMS() { delete[] xf; }
+
+    void set_lag(int new_lag) {
+        if (new_lag < 0) new_lag = 0;
+        if (new_lag != lag) {
+            float* replacement = new float[6 * (M + new_lag)];
+            delete[] xf;
+            xf = replacement;
+            lag = new_lag;
+        }
+        reset();
+    }
+
+    void reset() { clear_state(nonlinear); }
+
+    void seed_filter(const float* coeffs, int length, bool negate) {
+        const int n = length < 0 ? 0 : (length < M ? length : M);
+        for (int k = 0; k < n; ++k)
+            w[0][k] = negate ? -coeffs[k] : coeffs[k];
+        clear_range(w[0] + n, w[0] + M);
+        clear_range(w[1], w[1] + M);
+        clear_range(w[2], w[2] + M);
+    }
+
+    void seed_delta(int delay, float amp) {
+        if (delay >= 0 && delay < M) w[0][delay] = amp;
+    }
+
+    const float* weights() { return w[0]; }
+    const float* quadratic_weights() const { return w[1]; }
+    const float* cubic_weights() const { return w[2]; }
+
+    float process(float ref, float error_mic) {
+        const bool enabled = nonlinear; // One mode for this entire sample.
+        if (enabled != active_mode) clear_state(enabled);
+        const int branches = enabled ? 3 : 1;
+        if (clean_feedback)
+            ref -= duplicated_ring_dot<IR_LENGTH>(feedback_ir, z_feedback, feedback_head);
+
+        float features[3];
+        features[0] = ref;
+        if (enabled) {
+            features[1] = ref * ref;
+            features[2] = features[1] * ref;
+        }
+
+        float raw = duplicated_ring_FIR<M>(ref, w[0], x[0], &x_head[0]);
+        for (int b = 1; b < branches; ++b)
+            raw += duplicated_ring_FIR<M>(features[b], w[b], x[b], &x_head[b]);
+        const float control = -cancel_gain * raw;
+        if (clean_feedback)
+            duplicated_ring_push(control, z_feedback, &feedback_head, IR_LENGTH);
+        if (!adapt || mu == 0.0f) return control;
+
+        const int n = M + lag;
+        const float* gradient[3];
+        for (int b = 0; b < branches; ++b) {
+            const float filtered = duplicated_ring_FIR<IR_LENGTH>(
+                features[b], path_ir, z_path[b], &path_head[b]);
+            float* history = xf + b * (2 * n);
+            const float old = duplicated_ring_push(filtered, history, &xf_head[b], n);
+            int start = xf_head[b] + lag;
+            if (start >= n) start -= n;
+            gradient[b] = history + start;
+            const float newest = history[start];
+            if (enabled)
+                joint_energy += double(newest) * newest - double(old) * old;
+            else
+                linear_energy += newest * newest - old * old;
+        }
+        if (joint_energy < 0.0) joint_energy = 0.0;
+        if (linear_energy < 0.0f) linear_energy = 0.0f;
+        const double energy = enabled ? joint_energy : double(linear_energy);
+        mavg = mavg_weight * mavg + (1.0f - mavg_weight) * float(energy);
+        // if (mavg < ref_threshold) return control;
+        if (ref < 0.0075) return control;
+        update = !update;
+        if (!update) return control;
+
+        float step = mu;
+        if (NLMS)
+            step = enabled ? float(mu / (eps + energy)) : mu / (eps + linear_energy);
+        const float scale = update_sign * step * error_mic;
+        const float decay = 1.0f - leak;
+        if (energy < min_xnorm) min_xnorm = float(energy);
+        if (step > max_step) max_step = step;
+        if (fabsf(control) > max_control) max_control = fabsf(control);
+
+        for (int b = 0; b < branches; ++b)
+            for (int k = 0; k < M; ++k)
+                w[b][k] = decay * w[b][k] + scale * gradient[b][k];
+        return control;
+    }
+
+private:
+    FxLMS(const FxLMS&);
+    FxLMS& operator=(const FxLMS&);
+
+    int lag;
+    const float* path_ir;
+    const float* feedback_ir;
+    float* xf; // Three duplicated rings, each of length 2*(M+lag).
+    float w[3][M], x[3][2*M], z_path[3][2*IR_LENGTH], z_feedback[2*IR_LENGTH];
+    int x_head[3], xf_head[3], path_head[3], feedback_head;
+    bool active_mode, update;
+    double joint_energy;
+    float linear_energy, mavg;
+
+    static void clear_range(float* first, float* end) {
+        while (first != end) *first++ = 0.0f;
+    }
+
+    void clear_state(bool enabled) {
+        active_mode = enabled;
+        for (int b = 0; b < 3; ++b) {
+            clear_range(w[b], w[b] + M);
+            clear_range(x[b], x[b] + 2*M);
+            clear_range(z_path[b], z_path[b] + 2*IR_LENGTH);
+            x_head[b] = xf_head[b] = path_head[b] = 0;
+        }
+        clear_range(xf, xf + 6*(M+lag));
+        clear_range(z_feedback, z_feedback + 2*IR_LENGTH);
+        feedback_head = 0;
+        joint_energy = 0.0;
+        linear_energy = mavg = max_step = max_control = 0.0f;
+        min_xnorm = 1e30f;
+        update = false;
+    }
+};
+
